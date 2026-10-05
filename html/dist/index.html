@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111512" />
+    <meta name="description" content="输入配对码，将手机连接为电脑麦克风。" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>PocketLink</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23c7f48b'/%3E%3Cpath d='M9 13v6m5-11v16m5-13v10m5-7v4' stroke='%23101412' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/sender.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <span class="brand"
+          ><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span
+          >PocketLink</span
+        >
+        <button class="icon-button" id="open-settings" aria-label="设置">
+          <span data-icon="sliders"></span>
+        </button>
+      </header>
+      <main>
+        <section id="pair-view" class="pair-view" aria-labelledby="pair-title">
+          <div class="pair-heading">
+            <h1 id="pair-title">连接电脑</h1>
+            <p id="pair-hint">输入电脑上显示的配对码</p>
+          </div>
+          <form id="pair-form" novalidate>
+            <label class="sr-only" for="pair-code">8 位配对码</label>
+            <input
+              id="pair-code"
+              class="pair-input"
+              type="text"
+              inputmode="numeric"
+              enterkeyhint="go"
+              autocomplete="off"
+              spellcheck="false"
+              maxlength="9"
+              placeholder="0000 0000"
+              aria-describedby="pair-hint pair-status"
+            />
+            <button id="connect-button" class="primary-button" type="submit" disabled>连接</button>
+            <p id="pair-status" class="message" role="status" aria-live="polite"></p>
+            <button id="cancel-connect" type="button" class="text-button" hidden>取消连接</button>
+          </form>
+        </section>
+        <section id="mic-view" class="mic-view" aria-labelledby="mic-title" hidden>
+          <div class="session-row">
+            <span class="connection-status" id="connection-status"><i></i>已连接</span
+            ><button class="text-button" id="disconnect">断开</button>
+          </div>
+          <div class="mic-heading">
+            <h1 id="mic-title" tabindex="-1">麦克风</h1>
+            <time id="session-time">00:00</time>
+          </div>
+          <div class="mic-control">
+            <button id="mute-mic" class="mic-button" aria-label="静音麦克风" aria-pressed="false">
+              <span data-icon="mic"></span>
+            </button>
+            <p id="mic-caption" role="status">轻触静音</p>
+          </div>
+          <canvas id="waveform" aria-label="实时麦克风波形"></canvas>
+          <div class="voice-control">
+            <label for="voice-effect">变声</label
+            ><select id="voice-effect" aria-describedby="voice-status">
+              <option value="original">原声</option>
+              <option value="deep">低沉</option>
+              <option value="cartoon">卡通</option>
+              <option value="robot">机器人</option>
+            </select>
+          </div>
+          <p id="voice-status" class="sr-only" role="status">当前为原声</p>
+          <div class="gain-control">
+            <div class="label-row">
+              <label for="gain">音量</label><output id="gain-value" for="gain">100%</output>
+            </div>
+            <input id="gain" type="range" min="0" max="200" value="100" step="5" />
+          </div>
+          <button class="record-button" id="record-button">
+            <span class="record-dot"></span><span id="record-label">录音</span
+            ><time id="record-time" hidden>00:00</time>
+          </button>
+          <p id="mic-message" class="message" role="status" hidden></p>
+          <button id="resume-mic" class="secondary-button" hidden>恢复麦克风</button>
+        </section>
+        <details id="recordings" class="recordings" hidden>
+          <summary>录音 <span id="recording-count">0</span></summary>
+          <p class="recording-note">离开页面前，请下载保存。</p>
+          <div id="recording-list"></div>
+        </details>
+      </main>
+    </div>
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <div class="dialog-header">
+        <h2 id="settings-title">设置</h2>
+        <button class="icon-button" id="close-settings" aria-label="关闭设置">
+          <span data-icon="close"></span>
+        </button>
+      </div>
+      <fieldset id="connection-settings">
+        <legend>连接方式</legend>
+        <div class="mode-options">
+          <label><input type="radio" name="mode" value="lan" checked /><span>局域网</span></label>
+          <label><input type="radio" name="mode" value="server" /><span>服务器</span></label>
+          <label><input type="radio" name="mode" value="usb" /><span>有线</span></label>
+        </div>
+        <p id="mode-hint" class="setting-hint">手机和电脑连接同一网络。</p>
+        <div id="server-field" hidden>
+          <label for="server-url">服务器地址</label
+          ><input
+            id="server-url"
+            type="url"
+            placeholder="https://audio.example.com"
+            autocomplete="url"
+          />
+        </div>
+      </fieldset>
+      <fieldset class="audio-settings">
+        <legend>声音</legend>
+        <label class="toggle-setting"
+          ><span>降噪</span
+          ><input type="checkbox" role="switch" id="noise-suppression" checked /><span
+            class="switch-track"
+            aria-hidden="true"
+          ></span
+        ></label>
+        <label class="toggle-setting"
+          ><span>回声消除</span
+          ><input type="checkbox" role="switch" id="echo-cancellation" checked /><span
+            class="switch-track"
+            aria-hidden="true"
+          ></span
+        ></label>
+      </fieldset>
+      <p id="settings-message" class="message" role="status" hidden></p>
+    </dialog>
+  </body>
+</html>

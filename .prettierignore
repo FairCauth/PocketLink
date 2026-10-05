@@ -1,0 +1,12 @@
+node_modules/
+.npm-cache/
+.runtime/
+.tools/
+.openai/
+html/.openai/
+.sites-runtime/
+certs/
+artifacts/
+package-lock.json
+html/dist/receiver.js
+html/dist/receiver/index.html

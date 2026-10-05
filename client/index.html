@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#111512" />
+    <title>PocketLink · 接收端</title>
+    <link rel="stylesheet" href="/sender.css" />
+    <link rel="stylesheet" href="/receiver.css" />
+    <script type="module" src="/receiver.js"></script>
+  </head>
+  <body>
+    <div class="receiver-app">
+      <header class="header">
+        <span class="brand"
+          ><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span
+          >PocketLink</span
+        ><button class="icon-button" id="open-settings" aria-label="设置">
+          <span data-icon="sliders"></span>
+        </button>
+      </header>
+      <main>
+        <section class="pair-section" id="pair-section">
+          <h1>连接手机</h1>
+          <p class="subtitle">扫码直连，或打开网址输入配对码</p>
+          <div class="pair-code-row">
+            <output id="receiver-code" aria-live="polite">—— ——</output
+            ><button class="icon-button" id="copy-code" aria-label="复制配对码" disabled>
+              <span data-icon="copy"></span>
+            </button>
+          </div>
+          <button class="primary-button" id="create-code">创建配对码</button>
+          <div id="phone-entry" hidden>
+            <p class="connection-label">扫码直接连接</p>
+            <img id="phone-qr" width="176" height="176" alt="扫码自动配对电脑" />
+            <p class="connection-label manual-label">或打开网址，输入上方配对码</p>
+            <a id="phone-url" target="_blank" rel="noopener noreferrer"></a>
+            <button id="open-setup" class="text-button" hidden>首次使用 iPhone？</button>
+          </div>
+        </section>
+        <section id="audio-section" hidden>
+          <div class="connected-heading">
+            <span class="status-dot"></span>
+            <h1>手机已连接</h1>
+          </div>
+          <p id="audio-status" class="subtitle" role="status">等待手机音频</p>
+          <p id="output-route" class="setting-hint" role="status">电脑试听</p>
+          <div class="receiver-level" aria-label="接收音量">
+            <span id="receiver-level-bar"></span>
+          </div>
+          <div class="label-row">
+            <label for="output-volume">音量</label><output id="output-volume-value">70%</output>
+          </div>
+          <input id="output-volume" type="range" min="0" max="100" value="70" />
+          <button class="secondary-button" id="resume-audio" disabled>播放音频</button>
+        </section>
+        <p id="receiver-status" class="message" role="status">点击创建配对码</p>
+        <button class="text-button" id="disconnect" hidden>断开连接</button>
+        <audio id="remote-audio" autoplay playsinline></audio>
+      </main>
+    </div>
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <div class="dialog-header">
+        <h2 id="settings-title">设置</h2>
+        <button class="icon-button" id="close-settings" aria-label="关闭设置">
+          <span data-icon="close"></span>
+        </button>
+      </div>
+      <div class="audio-modes" role="group" aria-label="声音用途">
+        <button class="secondary-button" id="use-virtual-mic" aria-pressed="false">
+          系统麦克风
+        </button>
+        <button class="secondary-button" id="use-speakers" aria-pressed="true">电脑试听</button>
+      </div>
+      <p id="mic-device-hint" class="setting-hint">将手机声音用于会议、游戏等软件。</p>
+      <p id="settings-status" class="message" role="status"></p>
+      <details id="advanced-settings">
+        <summary>高级设置</summary>
+        <label for="output-device">播放设备</label
+        ><select id="output-device">
+          <option value="default">系统默认输出</option></select
+        ><button class="text-button" id="choose-output">选择音频设备</button>
+        <p class="setting-hint">「系统麦克风」会自动选择虚拟声卡通道，无需手动选择。</p>
+        <label for="receiver-server">接收服务地址</label
+        ><input type="url" id="receiver-server" placeholder="留空使用当前服务" />
+        <div id="network-field" hidden>
+          <label for="phone-network">手机访问地址</label
+          ><select id="phone-network"></select>
+          <p class="setting-hint">多张网卡时，选择与手机同一网络的地址。</p>
+        </div>
+        <p class="setting-hint">
+          首次使用需安装
+          <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener noreferrer"
+            >VB-CABLE</a
+          >。浏览器可能请求麦克风权限以读取设备列表，读取后立即停止采集。
+        </p>
+        <p class="setting-hint">
+          设备改名：Windows 设置 → 系统 → 声音 → 输入 → CABLE Output → 重命名为「PocketLink
+          麦克风」。
+        </p>
+      </details>
+    </dialog>
+    <dialog id="setup-dialog" aria-labelledby="setup-title">
+      <div class="dialog-header">
+        <h2 id="setup-title">iPhone 首次设置</h2>
+        <button class="icon-button" id="close-setup" aria-label="关闭首次设置">
+          <span data-icon="close"></span>
+        </button>
+      </div>
+      <p class="setting-hint">
+        手机扫码，用 Safari 打开并下载证书。已安装并信任过的手机可直接连接。
+      </p>
+      <img id="setup-qr" width="180" height="180" alt="iPhone 证书安装页面二维码" /><a
+        id="setup-url"
+        target="_blank"
+        rel="noopener noreferrer"
+      ></a>
+      <ol class="setup-steps">
+        <li><b>Settings → Profile Downloaded → Install</b></li>
+        <li>
+          <b>Settings → General → About → Certificate Trust Settings</b
+          ><span>在 Enable Full Trust for Root Certificates 下开启对应证书。</span>
+        </li>
+        <li>返回 Safari，点击「打开麦克风」。</li>
+      </ol>
+      <details>
+        <summary>证书信息</summary>
+        <p id="certificate-name"></p>
+        <code id="certificate-fingerprint"></code>
+      </details>
+    </dialog>
+  </body>
+</html>

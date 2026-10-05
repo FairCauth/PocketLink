@@ -1,0 +1,30 @@
+{
+  "name": "pocketlink",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal iPhone web microphone with WebRTC pairing, voice effects and a Windows receiver",
+  "scripts": {
+    "start": "node server/index.mjs",
+    "dev": "node --watch server/index.mjs",
+    "build:static": "node scripts/prepare-static.mjs",
+    "format": "prettier --write . && npm run build:static",
+    "format:check": "prettier --check .",
+    "check": "node scripts/check.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:ui": "node tests/receiver-output-ui.mjs && node tests/pairing-ui.mjs && node tests/sender-ui.mjs",
+    "test:launcher": "node tests/launcher-ui.mjs",
+    "test:cable": "node tests/virtual-cable-audio.mjs"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.3"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "prettier": "3.9.9"
+  }
+}

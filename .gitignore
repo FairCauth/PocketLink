@@ -1,0 +1,36 @@
+# Dependencies, downloaded tools and local service state
+node_modules/
+.npm-cache/
+.runtime/
+.tools/
+mkcert.exe
+*.download
+
+# Local credentials and certificates (including files outside certs/)
+certs/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+*.mobileprovision
+
+# Test output and machine-specific hosting metadata
+artifacts/
+coverage/
+playwright-report/
+test-results/
+*.log
+.sites-runtime/
+.openai/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
