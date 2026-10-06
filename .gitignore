@@ -5,6 +5,8 @@ node_modules/
 .tools/
 mkcert.exe
 *.download
+# Imported personal sound effects are local assets, not repository content.
+html/dist/sounds/
 
 # Local credentials and certificates (including files outside certs/)
 certs/

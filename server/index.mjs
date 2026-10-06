@@ -15,6 +15,10 @@ const mime = {
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.json': 'application/json',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.wasm': 'application/wasm',
 };
 const ROOM_TTL = 10 * 60 * 1000;
 const localAddresses = () =>

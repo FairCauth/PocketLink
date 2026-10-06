@@ -9,6 +9,27 @@ await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${app.server.address().port}`;
 let browser;
 const errors = [];
+const soundURLs = ['a', 'b'].map((letter) => `/sounds/${letter.repeat(64)}.wav`);
+function soundFixture(frequency) {
+  const rate = 48000;
+  const frames = rate * 3;
+  const wav = Buffer.alloc(44 + frames * 2);
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(wav.length - 8, 4);
+  wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(rate, 24);
+  wav.writeUInt32LE(rate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(frames * 2, 40);
+  for (let i = 0; i < frames; i++)
+    wav.writeInt16LE(Math.round(Math.sin((2 * Math.PI * frequency * i) / rate) * 6000), 44 + i * 2);
+  return wav;
+}
 const expectVisible = async (page, selector) =>
   page.locator(selector).waitFor({ state: 'visible' });
 const expectReleased = async (page) =>
@@ -54,7 +75,46 @@ try {
   await receiver.locator('#close-settings').click();
   const code = (await receiver.locator('#receiver-code').textContent()).replace(/\D/g, '');
   const phone = await context.newPage();
+  let failFirstSound = true;
+  let delaySecondSound = true;
+  let releaseSound;
+  await phone.route('**/sounds/index.json', (route) =>
+    route.fulfill({
+      json: {
+        sounds: soundURLs.map((url, i) => ({
+          id: String(i),
+          name: ['测试音效', '切换音效'][i],
+          url,
+        })),
+      },
+    }),
+  );
+  await phone.route(`**${soundURLs[0]}`, (route) => {
+    if (failFirstSound) {
+      failFirstSound = false;
+      return route.fulfill({ status: 404 });
+    }
+    return route.fulfill({ contentType: 'audio/wav', body: soundFixture(880) });
+  });
+  await phone.route(`**${soundURLs[1]}`, async (route) => {
+    if (delaySecondSound) {
+      delaySecondSound = false;
+      await new Promise((resolve) => {
+        releaseSound = resolve;
+      });
+    }
+    await route.fulfill({ contentType: 'audio/wav', body: soundFixture(1320) }).catch(() => {});
+  });
   await phone.addInitScript(() => {
+    // Pure-tone voice/routing fixtures must bypass speech-oriented AI suppression.
+    try {
+      localStorage.setItem(
+        'pocketlink-audio-settings',
+        JSON.stringify({ noiseSuppression: false, echoCancellation: true }),
+      );
+    } catch {
+      /* about:blank has no storage. */
+    }
     window.captureTracks = [];
     window.captureCount = 0;
     window.denyCapture = false;
@@ -211,6 +271,51 @@ try {
   console.log(
     'PASS real receiver hears each voice effect; changing voice preserves capture and mute',
   );
+  // Assert soundboard audio reaches the actual WebRTC receiver while microphone input is muted.
+  await phone.locator('#mute-mic').click();
+  await receiver.waitForFunction(() => window.receivedRms() < 0.003);
+  const firstSound = phone.locator('.sound-button').nth(0);
+  const secondSound = phone.locator('.sound-button').nth(1);
+  await firstSound.click();
+  await phone.waitForFunction(() =>
+    document.getElementById('sound-status').textContent.includes('加载失败'),
+  );
+  assert.equal(await firstSound.getAttribute('aria-pressed'), 'false');
+  await firstSound.click();
+  await receiver.waitForFunction(
+    () => window.receivedPeak() > 860 && window.receivedPeak() < 900 && window.receivedRms() > 0.02,
+  );
+  assert.equal(await phone.locator('#mute-mic').getAttribute('aria-pressed'), 'true');
+  await phone.waitForFunction(() => document.getElementById('stop-sound').hidden);
+  await receiver.waitForFunction(() => window.receivedRms() < 0.003);
+  await secondSound.click();
+  await phone.waitForFunction(() =>
+    document.getElementById('sound-status').textContent.includes('正在加载'),
+  );
+  await phone.locator('#stop-sound').click();
+  // Flush the cancelled network request, then prove no sound starts later.
+  while (!releaseSound) await new Promise((resolve) => setTimeout(resolve, 10));
+  releaseSound();
+  await phone.waitForTimeout(200);
+  assert.equal(await phone.locator('#stop-sound').isVisible(), false);
+  assert.ok((await receiver.evaluate(() => window.receivedRms())) < 0.003);
+  await secondSound.click();
+  await receiver.waitForFunction(
+    () =>
+      window.receivedPeak() > 1300 && window.receivedPeak() < 1340 && window.receivedRms() > 0.02,
+  );
+  await firstSound.click();
+  await receiver.waitForFunction(() => window.receivedPeak() > 860 && window.receivedPeak() < 900);
+  assert.equal(await secondSound.getAttribute('aria-pressed'), 'false');
+  await firstSound.click();
+  await receiver.waitForFunction(() => window.receivedRms() < 0.003);
+  assert.equal(await firstSound.getAttribute('aria-pressed'), 'false');
+  assert.equal(await phone.evaluate(() => window.captureCount), capturesBeforeVoice);
+  await phone.locator('#mute-mic').click();
+  await receiver.waitForFunction(() => window.receivedRms() > 0.02);
+  console.log(
+    'PASS soundboard reaches WebRTC while mic is muted; error retry, natural end, cancellation and switching',
+  );
   assert.equal(await receiver.locator('#pair-section').isVisible(), false);
   await receiver.locator('#output-volume').fill('35');
   assert.equal(await receiver.locator('#remote-audio').evaluate((audio) => audio.volume), 0.35);
@@ -331,6 +436,7 @@ try {
   await phone.evaluate(async () => {
     const { AudioEngine } = await import('/audio-engine.js');
     window.voiceEngine = new AudioEngine();
+    voiceEngine.options.noiseSuppression = false;
     window.voiceWarnings = [];
     voiceEngine.addEventListener('warning', (e) => voiceWarnings.push(e.detail.message));
     await voiceEngine.start();

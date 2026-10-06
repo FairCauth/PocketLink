@@ -84,6 +84,14 @@
             </div>
             <input id="gain" type="range" min="0" max="200" value="100" step="5" />
           </div>
+          <section id="soundboard" class="soundboard" aria-labelledby="sound-title" hidden>
+            <div class="label-row">
+              <h2 id="sound-title">音效</h2>
+              <button id="stop-sound" class="text-button" type="button" hidden>停止</button>
+            </div>
+            <div id="sound-list" class="sound-list"></div>
+            <p id="sound-status" class="sound-status" role="status" aria-live="polite"></p>
+          </section>
           <button class="record-button" id="record-button">
             <span class="record-dot"></span><span id="record-label">录音</span
             ><time id="record-time" hidden>00:00</time>
@@ -126,19 +134,38 @@
       <fieldset class="audio-settings">
         <legend>声音</legend>
         <label class="toggle-setting"
-          ><span>降噪</span
-          ><input type="checkbox" role="switch" id="noise-suppression" checked /><span
-            class="switch-track"
-            aria-hidden="true"
-          ></span
+          ><span>AI 降噪</span
+          ><input
+            type="checkbox"
+            role="switch"
+            id="noise-suppression"
+            aria-describedby="noise-status"
+            checked /><span class="switch-track" aria-hidden="true"></span
         ></label>
+        <p id="noise-status" class="processing-status" role="status">连接后启用 · 本地处理</p>
+        <div class="noise-preview-row">
+          <button id="noise-preview" class="preview-button" type="button" disabled>听效果</button>
+          <meter id="noise-meter" min="0" max="1" value="0" aria-label="处理后音量"></meter>
+        </div>
+        <div id="preview-controls" class="preview-controls" hidden>
+          <button id="preview-before" class="preview-button" type="button">降噪前</button>
+          <button id="preview-after" class="preview-button" type="button">降噪后</button>
+          <button id="preview-stop" class="text-button" type="button">停止</button>
+        </div>
+        <p id="preview-status" class="setting-hint" role="status">
+          连接后可录制 4 秒，对比降噪效果。
+        </p>
         <label class="toggle-setting"
           ><span>回声消除</span
-          ><input type="checkbox" role="switch" id="echo-cancellation" checked /><span
-            class="switch-track"
-            aria-hidden="true"
-          ></span
+          ><input
+            type="checkbox"
+            role="switch"
+            id="echo-cancellation"
+            aria-describedby="echo-status"
+            checked /><span class="switch-track" aria-hidden="true"></span
         ></label>
+        <p id="echo-status" class="processing-status" role="status">连接后启用</p>
+        <p class="setting-hint">电脑外放有回声时，建议使用耳机。</p>
       </fieldset>
       <p id="settings-message" class="message" role="status" hidden></p>
     </dialog>

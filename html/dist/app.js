@@ -1,10 +1,14 @@
 import { icon, renderIcons } from './icons.js';
 import { AudioEngine, friendlyError } from './audio-engine.js';
 import { AudioLink, serviceURL } from './connection.js';
+import { setupSoundboard } from './soundboard.js';
+import { setupSoundSettings } from './sound-settings.js';
 
 renderIcons();
 const $ = (id) => document.getElementById(id);
 const engine = new AudioEngine();
+const soundboard = setupSoundboard(engine);
+setupSoundSettings(engine);
 const link = new AudioLink();
 const canvas = $('waveform');
 const recordings = [];
@@ -178,7 +182,10 @@ link.addEventListener('status', (event) => {
     $('connection-status').classList.remove('reconnecting');
     updateView();
     drawWave();
-    if (firstConnection) $('mic-title').focus({ preventScroll: true });
+    if (firstConnection) {
+      $('mic-title').focus({ preventScroll: true });
+      void soundboard.load();
+    }
   } else if (state === 'reconnecting') {
     $('connection-status').innerHTML = '<i></i>正在重连';
     $('connection-status').classList.add('reconnecting');
@@ -250,27 +257,6 @@ document.querySelectorAll('[name="mode"]').forEach((input) => {
     $('mode-hint').textContent = hints[mode];
   });
 });
-async function updateOptions() {
-  const previous = { ...engine.options };
-  const inputs = [$('noise-suppression'), $('echo-cancellation')];
-  inputs.forEach((input) => (input.disabled = true));
-  message('settings-message');
-  try {
-    await engine.setOptions({
-      noiseSuppression: inputs[0].checked,
-      echoCancellation: inputs[1].checked,
-    });
-  } catch (error) {
-    inputs[0].checked = previous.noiseSuppression;
-    inputs[1].checked = previous.echoCancellation;
-    message('settings-message', friendlyError(error), true);
-  } finally {
-    inputs.forEach((input) => (input.disabled = false));
-  }
-}
-for (const id of ['noise-suppression', 'echo-cancellation'])
-  $(id).addEventListener('change', updateOptions);
-
 $('record-button').addEventListener('click', () => {
   try {
     if (engine.recording) engine.stopRecording();

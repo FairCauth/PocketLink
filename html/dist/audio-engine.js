@@ -1,4 +1,5 @@
 import { VOICES } from './voice-dsp.js';
+import { createNoiseProcessor } from './noise-processor.js';
 
 export class AudioEngine extends EventTarget {
   constructor() {
@@ -9,8 +10,14 @@ export class AudioEngine extends EventTarget {
     this.voice = 'original';
     this.voiceGeneration = 0;
     this.options = { noiseSuppression: true, echoCancellation: true };
+    this.noiseMode = 'off';
+    this.noiseGeneration = 0;
+    this.previewing = false;
     this.recording = false;
     this.generation = 0;
+    this.soundGeneration = 0;
+    this.sound = null;
+    this.soundBuffers = new Map();
   }
   emit(type, detail = {}) {
     this.dispatchEvent(new CustomEvent(type, { detail }));
@@ -25,7 +32,13 @@ export class AudioEngine extends EventTarget {
     this.state = 'starting';
     this.emit('state');
     try {
-      this.context = new (window.AudioContext || window.webkitAudioContext)();
+      const Context = window.AudioContext || window.webkitAudioContext;
+      try {
+        this.context = new Context({ sampleRate: 48000 });
+      } catch (error) {
+        if (error.name !== 'NotSupportedError') throw error;
+        this.context = new Context();
+      }
       // A scanned link has no page gesture. Obtain permission before resuming audio.
       if (!automatic) await this.context.resume();
       const raw = await navigator.mediaDevices.getUserMedia({
@@ -61,11 +74,17 @@ export class AudioEngine extends EventTarget {
       this.analyser.fftSize = 2048;
       this.analyser.smoothingTimeConstant = 0.8;
       this.destination = this.context.createMediaStreamDestination();
-      this.source.connect(this.gain);
+      // Stable microphone bus: capture → denoise → voice → gain → mix.
+      // Soundboard audio joins the mix afterwards, so denoising never removes effects.
+      this.micInput = this.context.createGain();
+      this.source.connect(this.micInput);
+      this.micInput.connect(this.gain);
       this.gain.connect(this.analyser);
       this.analyser.connect(this.destination);
       this.stream = this.destination.stream;
       this.stream.getAudioTracks()[0].contentHint = 'speech';
+      await this.configureProcessing();
+      if (generation !== this.generation) return;
       if (this.voice !== 'original') await this.setVoice(this.voice);
       if (generation !== this.generation) return;
       this.setGain(this.gainValue);
@@ -104,12 +123,79 @@ export class AudioEngine extends EventTarget {
   setGain(value) {
     this.gainValue = value;
     if (this.gain)
-      this.gain.gain.setTargetAtTime(this.muted ? 0 : value, this.context.currentTime, 0.015);
+      this.gain.gain.setTargetAtTime(
+        this.muted || this.previewing ? 0 : value,
+        this.context.currentTime,
+        0.015,
+      );
+  }
+  setPreviewing(value) {
+    this.previewing = value;
+    this.setGain(this.gainValue);
   }
   setMuted(value) {
     this.muted = value;
     this.setGain(this.gainValue);
     this.emit('state');
+  }
+  stopSound() {
+    ++this.soundGeneration;
+    this.soundRequest?.abort();
+    this.soundRequest = null;
+    if (this.soundSource) {
+      this.soundSource.onended = null;
+      this.soundSource.stop();
+      this.soundSource.disconnect();
+      this.soundSource = null;
+    }
+    this.sound = null;
+    this.emit('sound');
+  }
+  async playSound(sound) {
+    if (this.state !== 'on') throw new Error('请先连接麦克风。');
+    this.stopSound();
+    const request = this.soundGeneration;
+    const context = this.context;
+    const controller = new AbortController();
+    this.soundRequest = controller;
+    this.sound = { ...sound, loading: true };
+    this.emit('sound');
+    try {
+      // Resume inside the tap gesture, before fetching/decoding on iPhone.
+      await context.resume();
+      let buffer = this.soundBuffers.get(sound.url);
+      if (!buffer) {
+        const response = await fetch(sound.url, { signal: controller.signal });
+        if (!response.ok) throw new Error('音效加载失败，请刷新页面重试。');
+        const bytes = await response.arrayBuffer();
+        if (bytes.byteLength > 10 * 1024 * 1024) throw new Error('音效不能超过 10 MB。');
+        buffer = await context.decodeAudioData(bytes);
+        if (buffer.duration > 60) throw new Error('音效不能超过 60 秒。');
+        if (request !== this.soundGeneration || context !== this.context) return;
+        if (this.soundBuffers.size >= 8)
+          this.soundBuffers.delete(this.soundBuffers.keys().next().value);
+        this.soundBuffers.set(sound.url, buffer);
+      }
+      if (request !== this.soundGeneration || context !== this.context) return;
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      // Mix after microphone gain/voice processing, into the same WebRTC/recording stream.
+      // Never connect to context.destination: the phone speaker stays silent.
+      source.connect(this.analyser);
+      source.onended = () => {
+        if (this.soundSource === source) this.stopSound();
+      };
+      this.soundSource = source;
+      source.start();
+      this.soundRequest = null;
+      this.sound = { ...sound, loading: false };
+      this.emit('sound');
+    } catch (error) {
+      if (request !== this.soundGeneration || context !== this.context) return;
+      this.stopSound();
+      if (error.name === 'EncodingError') throw new Error('无法解码这个音效，请使用 MP3 或 WAV。');
+      throw error;
+    }
   }
   async setVoice(name) {
     if (!VOICES.includes(name)) throw new Error('未知变声效果');
@@ -146,8 +232,8 @@ export class AudioEngine extends EventTarget {
           { once: true },
         );
         node.connect(this.gain);
-        this.source.disconnect();
-        this.source.connect(node);
+        this.micInput.disconnect(this.gain);
+        this.micInput.connect(node);
         this.voiceNode = node;
       }
       if (context !== this.context || request !== this.voiceGeneration) return;
@@ -164,11 +250,11 @@ export class AudioEngine extends EventTarget {
   }
   resetVoice() {
     if (this.voiceNode) {
+      this.micInput?.disconnect(this.voiceNode);
       this.voiceNode.disconnect();
       this.voiceNode.port.close();
       this.voiceNode = null;
-      this.source?.disconnect();
-      if (this.source && this.gain) this.source.connect(this.gain);
+      if (this.micInput && this.gain) this.micInput.connect(this.gain);
     }
     this.voiceLoading = null;
     this.voice = 'original';
@@ -176,17 +262,103 @@ export class AudioEngine extends EventTarget {
   }
   async setOptions(options) {
     if (this.track) {
-      await this.track.applyConstraints({ ...options, autoGainControl: false });
+      await this.track.applyConstraints({
+        ...options,
+        noiseSuppression:
+          this.noiseMode === 'ai' && options.noiseSuppression ? false : options.noiseSuppression,
+        autoGainControl: false,
+      });
     }
     this.options = { ...options };
-    if (this.track) {
-      const actual = this.track.getSettings();
-      const unsupported = Object.keys(options).filter(
-        (k) => options[k] === true && actual[k] !== true,
-      );
-      if (unsupported.length)
-        this.emit('warning', { message: '部分声音处理选项由浏览器管理，实际效果取决于设备支持。' });
+    await this.configureProcessing();
+  }
+  processingStatus() {
+    const actual = this.track?.getSettings() || {};
+    return {
+      noise: this.noiseMode,
+      browserNoise: actual.noiseSuppression,
+      echo: actual.echoCancellation,
+      active: Boolean(this.track),
+    };
+  }
+  bypassNoise() {
+    if (this.noiseProcessor) {
+      this.source?.disconnect(this.noiseProcessor.node);
+      this.noiseProcessor.destroy();
+      this.noiseProcessor = null;
+      if (this.source && this.micInput) this.source.connect(this.micInput);
     }
+  }
+  async configureProcessing() {
+    const request = ++this.noiseGeneration;
+    this.noiseRequest?.abort();
+    const context = this.context;
+    if (!context || !this.track) {
+      this.emit('processing');
+      return;
+    }
+    if (this.options.noiseSuppression && this.noiseProcessor) {
+      this.emit('processing');
+      return;
+    }
+    this.bypassNoise();
+    this.noiseMode = this.options.noiseSuppression ? 'loading' : 'off';
+    this.emit('processing');
+    if (!this.options.noiseSuppression) {
+      return;
+    }
+    const controller = new AbortController();
+    this.noiseRequest = controller;
+    const timer = setTimeout(() => controller.abort(), 10000);
+    let processor;
+    try {
+      processor = await createNoiseProcessor(context, controller.signal);
+      if (context !== this.context || request !== this.noiseGeneration) {
+        processor.destroy();
+        return;
+      }
+      // Avoid stacking the browser's denoiser and RNNoise, which can clip quiet speech.
+      await this.track.applyConstraints({
+        ...this.options,
+        noiseSuppression: false,
+        autoGainControl: false,
+      });
+      if (context !== this.context || request !== this.noiseGeneration) {
+        processor.destroy();
+        return;
+      }
+      processor.node.connect(this.micInput);
+      this.source.disconnect(this.micInput);
+      this.source.connect(processor.node);
+      this.noiseProcessor = processor;
+      this.noiseMode = 'ai';
+      processor.node.addEventListener(
+        'processorerror',
+        () => {
+          if (this.noiseProcessor !== processor) return;
+          this.bypassNoise();
+          void this.fallbackNoise();
+        },
+        { once: true },
+      );
+    } catch {
+      processor?.destroy();
+      if (context !== this.context || request !== this.noiseGeneration) return;
+      await this.fallbackNoise();
+    } finally {
+      clearTimeout(timer);
+    }
+    this.emit('processing');
+  }
+  async fallbackNoise() {
+    const track = this.track;
+    this.noiseMode = 'browser';
+    try {
+      await track?.applyConstraints({ ...this.options, autoGainControl: false });
+    } catch {
+      /* Keep the microphone connected even if processing is unsupported. */
+    }
+    this.emit('processing');
   }
   startRecording() {
     if (
@@ -260,6 +432,13 @@ export class AudioEngine extends EventTarget {
   async stop() {
     ++this.generation;
     ++this.voiceGeneration;
+    ++this.noiseGeneration;
+    this.noiseRequest?.abort();
+    this.noiseRequest = null;
+    this.bypassNoise();
+    this.noiseMode = 'off';
+    this.previewing = false;
+    this.stopSound();
     this.stopRecording();
     this.state = 'off';
     this.muted = false;
@@ -270,6 +449,7 @@ export class AudioEngine extends EventTarget {
     this.raw?.getTracks().forEach((t) => t.stop());
     this.stream?.getTracks().forEach((t) => t.stop());
     this.source?.disconnect();
+    this.micInput?.disconnect();
     this.gain?.disconnect();
     this.analyser?.disconnect();
     if (this.voiceNode) {
@@ -290,6 +470,7 @@ export class AudioEngine extends EventTarget {
     this.stream = null;
     this.track = null;
     this.source = null;
+    this.micInput = null;
     this.analyser = null;
     this.gain = null;
     this.emit('state');

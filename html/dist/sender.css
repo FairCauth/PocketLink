@@ -612,6 +612,66 @@ fieldset:disabled {
     margin-top: 16px;
   }
 }
+.soundboard {
+  margin-top: 24px;
+}
+.soundboard h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.soundboard .label-row {
+  min-height: 32px;
+  margin-bottom: 8px;
+}
+.sound-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.sound-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #1b211b;
+  color: var(--text);
+  text-align: left;
+}
+.sound-button span {
+  color: var(--lime);
+  font-size: 11px;
+}
+.sound-button strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 400;
+}
+.sound-button[aria-pressed='true'] {
+  border-color: var(--lime);
+  background: #293522;
+}
+.sound-button:focus-visible {
+  outline: 2px solid var(--lime);
+  outline-offset: 3px;
+}
+.sound-button:disabled {
+  opacity: 0.5;
+}
+.sound-status {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.sound-status:empty {
+  display: none;
+}
 .voice-control {
   display: flex;
   align-items: center;
@@ -639,6 +699,62 @@ fieldset:disabled {
 }
 .voice-control select:disabled {
   opacity: 0.5;
+}
+.processing-status {
+  color: var(--muted);
+  font-size: 12px;
+  margin: -2px 0 16px;
+}
+.noise-preview-row,
+.preview-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.noise-preview-row {
+  margin-top: 4px;
+}
+.preview-controls {
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.preview-button {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #20291e;
+  color: var(--lime);
+  font: inherit;
+  font-size: 13px;
+}
+.preview-button:disabled {
+  opacity: 0.45;
+}
+.preview-button[aria-pressed='true'] {
+  border-color: var(--lime);
+}
+.preview-button:focus-visible {
+  outline: 2px solid var(--lime);
+  outline-offset: 3px;
+}
+#noise-meter {
+  flex: 1;
+  min-width: 0;
+  height: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: #30382d;
+}
+#noise-meter::-webkit-meter-bar {
+  border: 0;
+  background: #30382d;
+}
+#noise-meter::-webkit-meter-optimum-value {
+  background: var(--lime);
+}
+#noise-meter::-moz-meter-bar {
+  background: var(--lime);
 }
 @media (prefers-reduced-motion: reduce) {
   *,

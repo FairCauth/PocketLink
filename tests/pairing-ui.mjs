@@ -45,6 +45,17 @@ try {
     ],
   });
   const context = await browser.newContext();
+  await context.addInitScript(() => {
+    // This suite verifies transmission of a 440 Hz tone, not speech denoising.
+    try {
+      localStorage.setItem(
+        'pocketlink-audio-settings',
+        JSON.stringify({ noiseSuppression: false, echoCancellation: true }),
+      );
+    } catch {
+      /* about:blank has no storage. */
+    }
+  });
   const errors = [];
   context.on('page', (page) => page.on('pageerror', (error) => errors.push(error.message)));
   const receiver = await context.newPage();

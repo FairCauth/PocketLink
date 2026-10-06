@@ -8,15 +8,18 @@
     "start": "node server/index.mjs",
     "dev": "node --watch server/index.mjs",
     "build:static": "node scripts/prepare-static.mjs",
+    "import:sounds": "node scripts/import-sounds.mjs",
     "format": "prettier --write . && npm run build:static",
     "format:check": "prettier --check .",
     "check": "node scripts/check.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:ui": "node tests/receiver-output-ui.mjs && node tests/pairing-ui.mjs && node tests/sender-ui.mjs",
+    "test:noise": "node tests/noise-ui.mjs",
     "test:launcher": "node tests/launcher-ui.mjs",
     "test:cable": "node tests/virtual-cable-audio.mjs"
   },
   "dependencies": {
+    "@sapphi-red/web-noise-suppressor": "0.4.1",
     "qrcode": "^1.5.4",
     "ws": "^8.18.3"
   },
