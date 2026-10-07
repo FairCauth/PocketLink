@@ -21,6 +21,10 @@ SwiftUI 原生客户端，连接现有 Windows PocketLink 服务。最低 iOS 16
 
 ## 交给有 Mac 的朋友
 
+也可以直接使用 GitHub 云端导出的未签名 IPA：打开仓库 **Actions → iPhone App**，选择对应提交的成功运行，在 **Artifacts → PocketLink-unsigned-IPA** 下载并解压。内部的 `PocketLink-0.4.0-Build5-unsigned.ipa` 是真机 arm64 Release 包，可交给 Windows 签名工具签名安装，不是模拟器包。签名工具需要同时签名内嵌的 WebRTC framework。构建产物保留 30 天，也可手动 Run workflow 重新生成。
+
+Mac 本地导出同样的包：`bash ios/package-unsigned.sh`，结果位于 `ios/build/ipa/`。此流程无需在 GitHub 配置签名证书或 Apple 账号。
+
 需要完整 Xcode（建议 16 或更新，且支持手机当前的 iOS 版本），首次构建需联网下载 WebRTC。无需 CocoaPods、Homebrew 或 XcodeGen。
 
 1. 从 GitHub 获取最新 `main` 分支，将 **整个 `ios` 文件夹** 复制到 Mac。

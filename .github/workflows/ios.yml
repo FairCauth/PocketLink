@@ -22,3 +22,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build and test without signing
         run: bash ios/check.sh
+
+  unsigned-ipa:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build unsigned iPhone IPA
+        run: bash ios/package-unsigned.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PocketLink-unsigned-IPA
+          path: ios/build/ipa/*.ipa
+          if-no-files-found: error
+          retention-days: 30
