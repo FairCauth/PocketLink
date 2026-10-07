@@ -1,6 +1,6 @@
 # PocketLink iPhone App（0.4.0 / Build 5）
 
-SwiftUI 原生客户端，连接现有 Windows PocketLink 服务。最低 iOS 16。工程已经配置后台音频，目标是在开启麦克风后继续锁屏传音；**本次修复在 Windows 完成，尚未完成新版的 Xcode 编译和 iPhone 真机验收**。
+SwiftUI 原生客户端，连接现有 Windows PocketLink 服务。最低 iOS 16。工程已经配置后台音频，目标是在开启麦克风后继续锁屏传音；**Build 5 已通过 GitHub macOS 的 Xcode 编译和 XCTest；iPhone 真机验收尚未完成**。
 
 ## 本次更新与安装
 
@@ -8,7 +8,7 @@ SwiftUI 原生客户端，连接现有 Windows PocketLink 服务。最低 iOS 16
 - App 新增与电脑同步的输入麦克风选择器：电脑麦克风、手机（USB 有线 / 无线）、仅音效。按钮控制选中输入的启停；只有选择手机并点击开启才申请手机录音。切换到电脑麦克风停止手机人声发送，已明确开启的后台保持可继续使用采集会话。
 - 麦克风插拔、电脑端切换和手机连接方式实时同步，不自动改用其他麦克风。
 
-新增原生 USB 直连：App 默认选择 USB，输入电脑 USB 配对码即可等待数据线连接。无需热点、Wi-Fi、局域网、IP 或手机根证书。麦克风采用 AVAudioEngine，经 Apple USB 通道发送 PCM，音效与变声控制复用同一通道；无线仍用 WebRTC。需要重新在 Mac 编译安装 Build 5，Windows 模拟协议和浏览器播放已验证，Swift 编译与真机尚未验证。参见 [USB 设置](../docs/usb.md)。
+新增原生 USB 直连：App 默认选择 USB，输入电脑 USB 配对码即可等待数据线连接。无需热点、Wi-Fi、局域网、IP 或手机根证书。麦克风采用 AVAudioEngine，经 Apple USB 通道发送 PCM，音效与变声控制复用同一通道；无线仍用 WebRTC。需要重新在 Mac 编译安装 Build 5，Windows 模拟协议和浏览器播放已验证，Swift 编译和 XCTest 已通过；iPhone 真机尚未验证。参见 [USB 设置](../docs/usb.md)。
 
 - 麦克风启停、音频会话激活和连接清理改为独立串行队列。释放配置锁后才启用 WebRTC 音频和音轨，避免配置锁与音频线程相互等待、卡住界面。
 - 开启过程中点击断开或遭遇电话中断，会取消尚未完成的开启操作；旧连接的回调不会更新新连接状态。
@@ -71,7 +71,7 @@ USB：插线、解锁并信任电脑，在 Windows 运行 `Start-PocketLink.cmd`
 bash ios/check.sh
 ```
 
-脚本验证工程 plist、解析依赖、选择已安装的 iPhone 模拟器并构建运行 XCTest，不需要签名。测试覆盖扫码地址、手动配对码、IPv6、无效/不安全地址，以及慢速音频激活不阻塞主线程、激活中取消、重复开启的激活平衡、激活失败后的清理与重试。证书测试覆盖未安装根证书时的正确指纹、错误指纹、地址/端口不匹配和证书过期；新增 XCTest 在 Windows 尚未执行。也可以直接在 Xcode **Product → Test**。仓库提供 `iPhone App` GitHub Actions，iOS 源码推送后自动运行，构建结果以 GitHub Actions 页面为准。
+脚本验证工程 plist、解析依赖、选择已安装的 iPhone 模拟器并构建运行 XCTest，不需要签名。测试覆盖扫码地址、手动配对码、IPv6、无效/不安全地址，以及慢速音频激活不阻塞主线程、激活中取消、重复开启的激活平衡、激活失败后的清理与重试。证书测试覆盖未安装根证书时的正确指纹、错误指纹、地址/端口不匹配和证书过期；本轮 XCTest 已在 GitHub macOS/iOS 模拟器通过，包括证书未安装时的信任校验。[构建记录](https://github.com/FairCauth/PocketLink/actions/runs/37661628499)。也可以直接在 Xcode **Product → Test**。仓库提供 `iPhone App` GitHub Actions，iOS 源码推送后自动运行，构建结果以 GitHub Actions 页面为准。
 
 如果只复制了 iOS 源码包，在包含 `PocketLink.xcodeproj` 的文件夹中运行 `bash check.sh`。
 

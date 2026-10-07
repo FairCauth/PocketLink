@@ -2,7 +2,7 @@
 
 USB 模式通过 Apple 的 usbmux 通道传输麦克风音频与控制消息，**不需要个人热点、Wi-Fi、同一局域网、蜂窝数据或手机 HTTPS 根证书**。USB 模式不使用 WebRTC，也不回退到无线同步或热点网卡。电脑接收页、混音、变声和 VB-CABLE 输出保持可用。
 
-本次提供 iOS **0.4.0 / Build 5** 源码，需要重新在 Mac 编译签名并覆盖安装。旧 App 的“USB”实际使用热点网络，无法连接新版 USB 接收页。当前已通过 Windows 协议模拟和真实浏览器音频测试；新版 Swift 编译、iPhone USB 传音、锁屏和延迟尚未真机验收。
+本次提供 iOS **0.4.0 / Build 5** 源码，需要重新在 Mac 编译签名并覆盖安装。旧 App 的“USB”实际使用热点网络，无法连接新版 USB 接收页。当前已通过 Windows 协议模拟和真实浏览器音频测试；新版 Swift 编译和 XCTest 已通过 GitHub macOS 检查；iPhone USB 传音、锁屏和延迟尚未真机验收。
 
 ## 使用步骤
 
