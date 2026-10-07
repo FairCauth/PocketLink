@@ -173,15 +173,16 @@ private final class TestAudioDriver: AudioSessionDriver {
     func deactivate() throws { record("deactivate") }
 }
 
-// Public test certificate only. Both generated private keys were discarded.
+// Public certificate issued by the same mkcert tool as the launcher. Its temporary
+// root was never installed, and all private keys were discarded. Verify at 2027-01-01.
 final class PairingTrustTests: XCTestCase {
-    private let certificateDER = "MIIDIDCCAgigAwIBAgIUWu+kdSSgen8qEMJMmJs1peyagT8wDQYJKoZIhvcNAQELBQAwKTEnMCUGA1UEAwweUG9ja2V0TGluayBYQ1Rlc3QgZXBoZW1lcmFsIENBMB4XDTI2MDEwMTAwMDAwMFoXDTM2MDEwMTAwMDAwMFowITEfMB0GA1UEAwwWUG9ja2V0TGluayBYQ1Rlc3Qgb25seTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJSVzERyXDcE45FQkiX96+BE4jiB4D3qtOvrDD5SbupUcFs1sMBBg/tUOFBTrIws5LbmT1J46m7gems/sJEczZZhg2vaJMwwHOeIMpPN8eMmmjCtMiKrnslNoRZDGbbKhcyoFKzntyX2WixZVf3pAY+M+x+AHLc2I9yKTAkt4tFxmZDalPHjerz4I7idSjUhIjemkHth7yoJvyKZlf5bsRz7DYfA/P5mvCpMcntZtbU5gGf5MTQf/RwDuxVc2BxypmCKm69DaP6cmC9BYBZje56IU+D+1hR305fGVEhVd8xOxSXdOKjWll3hqo9xK6/LDZ/zn3BlBfZ4e4h/oK5NWYcCAwEAAaNIMEYwDAYDVR0TAQH/BAIwADAhBgNVHREEGjAYhwR/AAABhxAAAAAAAAAAAAAAAAAAAAABMBMGA1UdJQQMMAoGCCsGAQUFBwMBMA0GCSqGSIb3DQEBCwUAA4IBAQCUHC9uZCCNhc8GA6PfpQJ3JYcSEpc0bqR3APNiyz7xD2X9zCIAwQxb5CZ+98dXoX8STsC/aVmP9Ej2nU4GmHlXkcw9iOiEr++lV6ttjjkac7Vva08H/Www+SxLGEQDRX7RbMvPPbwRU/YQPG6cS2LYXhEGhH+mwIMvF+RlzvdzrO26ZQhXEIjmdi0EJ7EnD+VhoiEgLJF969jx819EPG/RA7Z8kwTcgKWbDmB36dfqEt5kISY2snuYllYMgWY9HKLNgBvXr7YnykKqXZ0Dp81BaIMQBpw3oruRZhi32Z1pbRArilOQu3nUwpqT20wkvV1x78tVlNtC9Pime6skMZ9m"
+    private let certificateDER = "MIIEKzCCApOgAwIBAgIQaVhQveJAXUKiYB4L60iyzzANBgkqhkiG9w0BAQsFADBrMR4wHAYDVQQKExVta2NlcnQgZGV2ZWxvcG1lbnQgQ0ExIDAeBgNVBAsMF0pBV1dcMTUwMjZAamF3dyAoMTUwMjYpMScwJQYDVQQDDB5ta2NlcnQgSkFXV1wxNTAyNkBqYXd3ICgxNTAyNikwHhcNMjYxMDA3MTc0NTM3WhcNMjkwMTA3MTc0NTM3WjBLMScwJQYDVQQKEx5ta2NlcnQgZGV2ZWxvcG1lbnQgY2VydGlmaWNhdGUxIDAeBgNVBAsMF0pBV1dcMTUwMjZAamF3dyAoMTUwMjYpMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoZFYzbjBWsb63aZYMRXyv88fXWfNjS03dGqzzZ0hC1icQnZRV0Ti6PFnHvE1K8gfXQubwMOwYt6S4RspG0DvZR0nNC3180PmFX0tivTT4i3ZIB708CoURfLqcBjha5K5pLOJTS4J7kqXZBV7HKhqv0Or5LFHdM8BwTuxyzTMXbV76QG797rlJLkUAWkHVFJI/o8Rp3OkVOXd+OnbZJrwySnVCN0vOoFp0A43C5Co2uBKoPIvFHS0q+qpSkxOIv7rqDwyqoeyK7MHAFwVgpWV0LXz5uMnmkHBxoyanMi02HBHPUP6MTu5lhb7Rvzw7u/7LFxVXLmf/7cH8AO5sMbGIQIDAQABo2swaTAOBgNVHQ8BAf8EBAMCBaAwEwYDVR0lBAwwCgYIKwYBBQUHAwEwHwYDVR0jBBgwFoAUG8xh3VetC7c6kvTdcnOeR/TGa9kwIQYDVR0RBBowGIcEfwAAAYcQAAAAAAAAAAAAAAAAAAAAATANBgkqhkiG9w0BAQsFAAOCAYEA2CtcJpzKeh1PS/6wV6xaCy175LZfpqjw/VQL2vgHbWhuAkwirQSTikT9fTDNBhKAm6WSHsPtnfMAK+VtNqC3xOsSNXUfy/bTWhlyln4VnvxsQ78+7zc+rGTxtSe7GiNVYnDMaomTcOAtrLV/Os6zeKCO/6cFonZgdtLD5MeVm9xqJICQ0LFAPv9q5R0ZZTOhw26o/aG+TLuVNZJkobLI16eAk49QD7jtnfJGtlV1FxpFP6qGlYrk+H0PW+CK7dMShOjZ0OgMvpLKxSbsJ9pzS6Xki+Xk8wGZbl7+rHt8Ivn0KsniDyPdO2wiGL8P8wA6zqdM5F5L0Or5qJFJck6OAiVGuBktOhDCytwD2RRpqtLM7VpJlpbuDYVqpHVSG2Zc1vm6SRPpdPySXG10F5ol4b621eu+I/jq9kpgyJD1w3l2VDRjxzBlaBSVQWiCeCogjhmnalcFNqzqxtZQHO1ogBbkmX7MMSSMLW3sOoVassL/Qh3hHfEEZQxoi3ffqlUU"
 
     private func certificate() throws -> SecCertificate {
         let data = try XCTUnwrap(Data(base64Encoded: certificateDER))
         return try XCTUnwrap(SecCertificateCreateWithData(nil, data as CFData))
     }
-    private func trust(at time: TimeInterval = 1893456000) throws -> SecTrust {
+    private func trust(at time: TimeInterval = 1798761600) throws -> SecTrust {
         var value: SecTrust?
         XCTAssertEqual(SecTrustCreateWithCertificates(try certificate(), SecPolicyCreateSSL(true, "127.0.0.1" as CFString), &value), errSecSuccess)
         let result = try XCTUnwrap(value)
@@ -196,7 +197,8 @@ final class PairingTrustTests: XCTestCase {
     }
     func testPinnedLeafWorksWithoutInstalledRoot() throws {
         XCTAssertFalse(SecTrustEvaluateWithError(try trust(), nil))
-        XCTAssertTrue(try policy().accepts(trust(), host: "127.0.0.1", port: 8787))
+        let value = try trust()
+        XCTAssertTrue(try policy().accepts(value, host: "127.0.0.1", port: 8787), "\(String(describing: SecTrustCopyResult(value)))")
         XCTAssertTrue(try policy(host: "[::1]").accepts(trust(), host: "::1", port: 8787))
     }
     func testRejectsReplacementWrongOriginWrongHostnameAndExpiry() throws {
