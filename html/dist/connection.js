@@ -28,12 +28,13 @@ export class AudioLink extends EventTarget {
   send(data) {
     if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(data));
   }
-  async open({ role, code, server, mode = 'lan', stream }) {
+  async open({ role, code, server, mode = 'lan', stream, control = false }) {
     this.close();
     const generation = ++this.generation;
     this.role = role;
     this.mode = mode;
     this.stream = stream;
+    this.useControl = control;
     this.setStatus('connecting');
     try {
       const base = serviceURL(server);
@@ -94,6 +95,7 @@ export class AudioLink extends EventTarget {
     }
   }
   async handle(message) {
+    if (message.type === 'sounds-changed') this.emit('sounds-changed');
     if (message.type === 'error') throw new Error(message.message);
     if (message.type === 'created') {
       clearTimeout(this.connectTimeout);
@@ -103,6 +105,10 @@ export class AudioLink extends EventTarget {
     if (message.type === 'joined') {
       clearTimeout(this.connectTimeout);
       this.createPeer(this.mode);
+      if (this.useControl) {
+        this.controlChannel = this.peer.createDataChannel('pocketlink-control-v1');
+        this.emit('control', { channel: this.controlChannel });
+      }
       this.setStatus('negotiating');
       this.stream.getTracks().forEach((track) => this.peer.addTrack(track, this.stream));
       await this.peer.setLocalDescription(await this.peer.createOffer());
@@ -151,6 +157,11 @@ export class AudioLink extends EventTarget {
     };
     peer.ontrack = (e) =>
       this.emit('stream', { stream: e.streams[0] || new MediaStream([e.track]) });
+    peer.ondatachannel = ({ channel }) => {
+      if (this.role === 'receiver' && channel.label === 'pocketlink-control-v1')
+        this.emit('control', { channel });
+      else channel.close();
+    };
     peer.onconnectionstatechange = () => {
       if (peer !== this.peer) return;
       if (peer.connectionState === 'connected') {
@@ -201,6 +212,8 @@ export class AudioLink extends EventTarget {
     this.emit('error', { message: error.message });
   }
   clearPeer() {
+    this.controlChannel?.close();
+    this.controlChannel = null;
     clearTimeout(this.peerTimeout);
     clearTimeout(this.disconnectTimeout);
     clearInterval(this.statsTimer);
@@ -208,6 +221,7 @@ export class AudioLink extends EventTarget {
       this.peer.onconnectionstatechange = null;
       this.peer.onicecandidate = null;
       this.peer.ontrack = null;
+      this.peer.ondatachannel = null;
       this.peer.close();
       this.peer = null;
     }

@@ -3,10 +3,12 @@ import https from 'node:https';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { randomInt, createHmac } from 'node:crypto';
+import { randomInt, createHmac, randomBytes } from 'node:crypto';
+import { addSound, MAX_SOUND_BYTES } from './sound-library.mjs';
 import { networkInterfaces } from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
 import QRCode from 'qrcode';
+import { installUSBBridge } from './usb-bridge.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const mime = {
@@ -36,6 +38,13 @@ export async function createPocketServer(options = {}) {
     ? { cert: await readFile(env.TLS_CERT), key: await readFile(env.TLS_KEY) }
     : null;
   const protocol = tls ? 'https' : 'http';
+  const soundDirectory = options.soundDirectory || path.join(root, 'html/dist/sounds');
+  const uploadToken = randomBytes(32).toString('hex');
+  let uploading = false;
+  const localClients = new Set(['127.0.0.1', '::1', ...localAddresses()]);
+  const mayUpload = (req) =>
+    !req.headers['x-forwarded-for'] &&
+    localClients.has(req.socket.remoteAddress?.replace(/^::ffff:/, ''));
   const allowedOrigins = new Set(
     (env.ALLOWED_ORIGINS || '')
       .split(',')
@@ -69,12 +78,19 @@ export async function createPocketServer(options = {}) {
     const actualPort = server.address()?.port || port;
     return {
       protocol: 'pocketlink-v1',
+      usbProtocol: 'pocketlink-usb-v1',
       iceServers: iceServers(),
       relayAvailable,
       secure: Boolean(tls || publicOrigin?.startsWith('https:')),
       phoneURLs: publicOrigin
         ? [publicOrigin]
         : phoneAddresses.map((ip) => `${protocol}://${ip}:${actualPort}`),
+      phoneNetworks: publicOrigin
+        ? [{ kind: 'server' }]
+        : phoneAddresses.map((ip) => ({
+            kind: options.usbAddresses?.includes(ip) ? 'usb' : 'lan',
+          })),
+      networkDiagnostic: options.networkDiagnostic || '',
       setupURLs:
         options.setup && !publicOrigin
           ? phoneAddresses.map((ip) => `http://${ip}:${options.setup.port}/setup`)
@@ -104,7 +120,8 @@ export async function createPocketServer(options = {}) {
       headers['Access-Control-Allow-Origin'] = origin;
       headers.Vary = 'Origin';
     }
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    const upload = req.method === 'POST' && req.url?.split('?')[0] === '/api/sounds';
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !upload) {
       res.writeHead(405, { ...headers, Allow: 'GET, HEAD, OPTIONS' }).end();
       return;
     }
@@ -120,8 +137,58 @@ export async function createPocketServer(options = {}) {
     }
     try {
       const url = new URL(req.url, `${protocol}://localhost`);
+      if (upload) {
+        const reply = (code, value) =>
+          res
+            .writeHead(code, { ...headers, 'Content-Type': 'application/json' })
+            .end(JSON.stringify(value));
+        if (
+          !mayUpload(req) ||
+          req.headers['x-pocketlink-upload'] !== uploadToken ||
+          (origin && origin !== new URL(`${protocol}://${req.headers.host}`).origin)
+        ) {
+          reply(403, { error: '请在运行服务的电脑上添加音效。' });
+          return;
+        }
+        if (uploading) {
+          reply(429, { error: '正在导入其他音效，请稍后重试。' });
+          return;
+        }
+        if (Number(req.headers['content-length']) > MAX_SOUND_BYTES) {
+          reply(413, { error: '单个音效不能超过 10 MB。' });
+          return;
+        }
+        uploading = true;
+        const timer = setTimeout(() => req.destroy(), 30000);
+        try {
+          const chunks = [];
+          let length = 0;
+          for await (const chunk of req) {
+            length += chunk.length;
+            if (length > MAX_SOUND_BYTES) {
+              reply(413, { error: '单个音效不能超过 10 MB。' });
+              return;
+            }
+            chunks.push(chunk);
+          }
+          const sound = await addSound(
+            soundDirectory,
+            url.searchParams.get('name') || '',
+            Buffer.concat(chunks),
+          );
+          reply(201, { sound });
+          for (const ws of wss.clients) if (ws.room) send(ws, { type: 'sounds-changed' });
+        } catch (error) {
+          if (!res.headersSent && !res.destroyed) reply(400, { error: error.message });
+        } finally {
+          clearTimeout(timer);
+          uploading = false;
+        }
+        return;
+      }
       if (url.pathname === '/api/config') {
         const config = clientConfig();
+        if (mayUpload(req)) config.soundUploadToken = uploadToken;
         res.writeHead(200, { ...headers, 'Content-Type': 'application/json' });
         res.end(req.method === 'HEAD' ? undefined : JSON.stringify(config));
         return;
@@ -142,7 +209,21 @@ export async function createPocketServer(options = {}) {
             return;
           }
           const pairingURL = new URL(target);
-          pairingURL.hash = new URLSearchParams({ pair: code }).toString();
+          const mode = url.searchParams.get('mode');
+          if (mode === 'usb') {
+            res
+              .writeHead(400, headers)
+              .end('USB direct connection requires the native iOS app and /usb endpoint');
+            return;
+          }
+          if (mode !== null && !['lan', 'usb', 'server'].includes(mode)) {
+            res.writeHead(400, headers).end('Invalid connection mode');
+            return;
+          }
+          pairingURL.hash = new URLSearchParams({
+            pair: code,
+            ...(mode ? { mode } : {}),
+          }).toString();
           target = pairingURL.href;
         }
         const svg = await QRCode.toString(target, {
@@ -164,6 +245,10 @@ export async function createPocketServer(options = {}) {
       let base = path.join(root, 'html/dist');
       let relative =
         url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).slice(1);
+      if (url.pathname.startsWith('/sounds/')) {
+        base = soundDirectory;
+        relative = decodeURIComponent(url.pathname.slice('/sounds/'.length));
+      }
       if (['/receiver', '/receiver/', '/receiver/index.html'].includes(url.pathname)) {
         base = path.join(root, 'client');
         relative = 'index.html';
@@ -199,6 +284,7 @@ export async function createPocketServer(options = {}) {
     }
   };
   const server = tls ? https.createServer(tls, handler) : http.createServer(handler);
+  const usb = installUSBBridge(server, options.usbBridge);
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const rooms = new Map();
   const addresses = new Map();
@@ -224,6 +310,7 @@ export async function createPocketServer(options = {}) {
     }
   }
   server.on('upgrade', (req, socket, head) => {
+    if (usb.upgrade(req, socket, head)) return;
     if (req.url !== '/signal' || !isAllowed(req)) {
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
@@ -298,7 +385,7 @@ export async function createPocketServer(options = {}) {
         if (
           typeof message.code !== 'string' ||
           !/^\d{8}$/.test(message.code) ||
-          !['lan', 'usb', 'server'].includes(message.mode)
+          !['lan', 'server'].includes(message.mode)
         ) {
           error(ws, '配对码或传输方式无效');
           return;
@@ -403,6 +490,7 @@ export async function createPocketServer(options = {}) {
     protocol,
     close: () =>
       new Promise((resolve) => {
+        usb.close();
         clearInterval(heartbeat);
         for (const ws of wss.clients) ws.terminate();
         wss.close();

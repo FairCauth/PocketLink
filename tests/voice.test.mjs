@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VoiceDSP, VOICES } from '../html/dist/voice-dsp.js';
+import { VoiceDSP, VOICES, VOICE_PRESETS } from '../html/dist/voice-dsp.js';
 
-function peakFrequency(samples, rate, min = 250, max = 750) {
+function peakFrequency(samples, rate, min = 200, max = 800) {
   let peak = 0,
     frequency = 0;
   for (let hz = min; hz <= max; hz += 2) {
@@ -43,6 +43,17 @@ for (const rate of [44100, 48000]) {
         assert.ok(Math.abs(peak - 440 * 2 ** (7 / 12)) < 15, `cartoon peak: ${peak}`);
       if (name === 'robot')
         assert.ok(Math.min(Math.abs(peak - 370), Math.abs(peak - 510)) <= 2, `robot peak: ${peak}`);
+      if (['warm', 'bright', 'giant'].includes(name)) {
+        const preset = VOICE_PRESETS.find((preset) => preset.id === name);
+        assert.ok(
+          Math.abs(peak - 440 * 2 ** (preset.semitones / 12)) < 15,
+          `${name} peak: ${peak}`,
+        );
+      }
+      if (name === 'alien') {
+        const shifted = 440 * 2 ** (5 / 12);
+        assert.ok(Math.min(Math.abs(peak - shifted - 35), Math.abs(peak - shifted + 35)) < 15);
+      }
     }
   });
 }

@@ -60,6 +60,8 @@ try {
   context.on('page', (page) => page.on('pageerror', (error) => errors.push(error.message)));
   const receiver = await context.newPage();
   await receiver.goto(base + '/receiver');
+  if (!(await receiver.locator('#phone-dialog').isVisible()))
+    await receiver.locator('#open-phone').click();
   await receiver.locator('#create-code').click();
   const waitCode = async () => {
     await receiver.waitForFunction(
@@ -83,6 +85,8 @@ try {
     return url;
   };
   const firstQR = await verifyQR();
+  if (await receiver.locator('#phone-dialog').isVisible())
+    await receiver.locator('#close-phone').click();
   await receiver.locator('#open-settings').click();
   await receiver.locator('#advanced-settings > summary').click();
   await receiver.locator('#phone-network').selectOption('1');
@@ -120,7 +124,9 @@ try {
   });
   const connected = async () => {
     await phone.locator('#mic-view').waitFor({ state: 'visible', timeout: 15000 });
-    await receiver.locator('#audio-section').waitFor({ state: 'visible' });
+    await receiver.locator('#input-device option[value=phone]').waitFor({ state: 'attached' });
+    await receiver.locator('#input-device').selectOption('phone');
+    await receiver.locator('#input-toggle').click();
   };
   const released = () =>
     phone.waitForFunction(() => captureTracks.every((track) => track.readyState === 'ended'));
@@ -134,6 +140,9 @@ try {
   // Open the exact QR payload without clicking anything on the phone page.
   await phone.goto(firstQR);
   await connected();
+  assert.equal(await phone.evaluate(() => captureCount), 0);
+  await phone.locator('#phone-microphone').click();
+  await phone.locator('#microphone-controls').waitFor({ state: 'visible' });
   assert.equal(await phone.evaluate(() => captureCount), 1);
   assert.equal(new URL(phone.url()).hash, '');
   await receiver.waitForFunction(
@@ -145,9 +154,11 @@ try {
   assert.equal(await phone.locator('#pair-code').inputValue(), '');
   assert.equal(await phone.locator('#pair-view').isVisible(), true);
   console.log(
-    'PASS exact QR opens, pairs and sends audio without a phone-page click; refresh returns to manual entry',
+    'PASS exact QR opens, pairs without capture; microphone starts only after a tap; refresh returns to manual entry',
   );
 
+  if (!(await receiver.locator('#phone-dialog').isVisible()))
+    await receiver.locator('#open-phone').click();
   await receiver.locator('#create-code').click();
   await receiver.waitForFunction((old) => {
     const value = document.getElementById('receiver-code').textContent.replace(/\D/g, '');
@@ -175,34 +186,33 @@ try {
   await phone.evaluate(() => (sessionStorage.denyCapture = 'true'));
   await phone.reload();
   await phone.goto(currentQR);
-  await phone.waitForFunction(
-    () =>
-      document.getElementById('pair-status').textContent.includes('权限被拒绝') &&
-      !document.getElementById('connect-button').disabled,
-  );
-  assert.equal((await phone.locator('#pair-code').inputValue()).replace(/\D/g, ''), code);
-  await phone.evaluate(() => sessionStorage.removeItem('denyCapture'));
-  await phone.locator('#connect-button').click();
   await connected();
+  assert.equal(await phone.evaluate(() => captureCount), 0);
+  await phone.locator('#phone-microphone').click();
+  await phone.waitForFunction(() =>
+    document.getElementById('mic-message').textContent.includes('权限被拒绝'),
+  );
+  assert.equal(await phone.locator('#mic-view').isVisible(), true);
+  await phone.evaluate(() => sessionStorage.removeItem('denyCapture'));
+  await phone.locator('#phone-microphone').click();
+  await phone.locator('#microphone-controls').waitFor({ state: 'visible' });
   await disconnect();
   await phone.evaluate(() => (sessionStorage.suspendAudio = 'true'));
   await phone.reload();
   await phone.goto(currentQR);
-  await phone.waitForFunction(
-    () =>
-      document.getElementById('pair-status').textContent.includes('启用麦克风') &&
-      !document.getElementById('connect-button').disabled,
-  );
-  await released();
-  await phone.evaluate(() => (window.allowAudioResume = true));
-  await phone.locator('#connect-button').click();
   await connected();
+  assert.equal(await phone.evaluate(() => captureCount), 0);
+  await phone.evaluate(() => (window.allowAudioResume = true));
+  await phone.locator('#phone-microphone').click();
+  await phone.locator('#microphone-controls').waitFor({ state: 'visible' });
   await disconnect();
+  if (!(await receiver.locator('#phone-dialog').isVisible()))
+    await receiver.locator('#open-phone').click();
   await receiver.locator('#disconnect').click();
   assert.equal(await receiver.locator('#phone-entry').isVisible(), false);
   assert.equal(await receiver.locator('#phone-qr').getAttribute('src'), null);
   console.log(
-    'PASS permission denial and suspended audio retain scanned code for one-tap retry; cancel removes QR',
+    'PASS permission denial and suspended audio keep sound-only pairing available; cancel removes QR',
   );
   assert.deepEqual(errors, []);
   console.log('ALL PASS (Chromium synthetic microphone, normal autoplay policy)');

@@ -54,7 +54,9 @@ try {
   const receiver = await context.newPage();
   await receiver.goto(`${base}/receiver`);
   await mkdir(new URL('../artifacts/', import.meta.url), { recursive: true });
-  assert.equal(await receiver.locator('#audio-section').isVisible(), false);
+  assert.equal(await receiver.locator('#audio-section').isVisible(), true);
+  if (!(await receiver.locator('#phone-dialog').isVisible()))
+    await receiver.locator('#open-phone').click();
   await receiver.locator('#create-code').click();
   await receiver.waitForFunction(() =>
     /^\d{4} \d{4}$/.test(document.getElementById('receiver-code').textContent),
@@ -69,6 +71,8 @@ try {
     );
   }
   await receiver.screenshot({ path: 'artifacts/receiver-pair.png', fullPage: true });
+  if (await receiver.locator('#phone-dialog').isVisible())
+    await receiver.locator('#close-phone').click();
   await receiver.locator('#open-settings').click();
   assert.equal(await receiver.locator('#use-virtual-mic').isVisible(), true);
   assert.equal(await receiver.locator('#output-device').isVisible(), false);
@@ -78,7 +82,7 @@ try {
   let failFirstSound = true;
   let delaySecondSound = true;
   let releaseSound;
-  await phone.route('**/sounds/index.json', (route) =>
+  await receiver.route('**/sounds/index.json', (route) =>
     route.fulfill({
       json: {
         sounds: soundURLs.map((url, i) => ({
@@ -89,14 +93,14 @@ try {
       },
     }),
   );
-  await phone.route(`**${soundURLs[0]}`, (route) => {
+  await receiver.route(`**${soundURLs[0]}`, (route) => {
     if (failFirstSound) {
       failFirstSound = false;
       return route.fulfill({ status: 404 });
     }
     return route.fulfill({ contentType: 'audio/wav', body: soundFixture(880) });
   });
-  await phone.route(`**${soundURLs[1]}`, async (route) => {
+  await receiver.route(`**${soundURLs[1]}`, async (route) => {
     if (delaySecondSound) {
       delaySecondSound = false;
       await new Promise((resolve) => {
@@ -165,14 +169,17 @@ try {
   await phone.evaluate(() => (window.denyCapture = true));
   await phone.locator('#pair-code').fill(code);
   await phone.locator('#connect-button').click();
-  await phone.waitForFunction(
-    () =>
-      document.getElementById('pair-status').textContent.includes('权限被拒绝') &&
-      !document.getElementById('connect-button').disabled,
+  await expectVisible(phone, '#mic-view');
+  assert.equal(await phone.evaluate(() => captureCount), 0);
+  await phone.locator('#phone-microphone').click();
+  await phone.waitForFunction(() =>
+    document.getElementById('mic-message').textContent.includes('权限被拒绝'),
   );
-  assert.equal(await phone.locator('#mic-view').isVisible(), false);
+  assert.equal(await phone.locator('#mic-view').isVisible(), true);
   await phone.evaluate(() => (window.denyCapture = false));
-  console.log('PASS permission denial stays on pairing page and can retry');
+  await phone.locator('#disconnect').click();
+  await phone.locator('#pair-view').waitFor({ state: 'visible' });
+  console.log('PASS sound-only pairing needs no permission; denial keeps pairing available');
 
   await phone.locator('#pair-code').fill(code === '11111111' ? '22222222' : '11111111');
   await phone.locator('#connect-button').click();
@@ -201,9 +208,17 @@ try {
     await receiver.waitForFunction(() =>
       document.getElementById('receiver-status').textContent.includes('已连接'),
     );
+    await phone.locator('#phone-microphone').click();
+    await phone.waitForFunction(() => !document.getElementById('phone-microphone').disabled);
+    await receiver.locator('#input-device option[value=phone]').waitFor({ state: 'attached' });
+    await receiver.locator('#input-device').selectOption('phone');
+    await receiver.locator('#input-toggle').click();
   };
   await connect();
   assert.equal(await phone.locator('#pair-view').isVisible(), false);
+  await phone.waitForFunction(() =>
+    document.getElementById('phone-input-hint').textContent.includes('电脑正在使用手机输入'),
+  );
   await receiver.evaluate(async () => {
     const audio = document.getElementById('remote-audio');
     const context = new AudioContext();
@@ -278,7 +293,7 @@ try {
   const secondSound = phone.locator('.sound-button').nth(1);
   await firstSound.click();
   await phone.waitForFunction(() =>
-    document.getElementById('sound-status').textContent.includes('加载失败'),
+    document.getElementById('sound-status').textContent.includes('无法读取'),
   );
   assert.equal(await firstSound.getAttribute('aria-pressed'), 'false');
   await firstSound.click();
@@ -314,7 +329,7 @@ try {
   await phone.locator('#mute-mic').click();
   await receiver.waitForFunction(() => window.receivedRms() > 0.02);
   console.log(
-    'PASS soundboard reaches WebRTC while mic is muted; error retry, natural end, cancellation and switching',
+    'PASS remote soundboard plays on the desktop while mic is muted; error retry, natural end, cancellation and switching',
   );
   assert.equal(await receiver.locator('#pair-section').isVisible(), false);
   await receiver.locator('#output-volume').fill('35');
@@ -388,8 +403,8 @@ try {
     }
   });
   assert.ok(
-    recordedPeak > 640 && recordedPeak < 680,
-    `recording is missing voice effect: ${recordedPeak}`,
+    recordedPeak > 430 && recordedPeak < 450,
+    `phone recording must remain local without desktop processing: ${recordedPeak}`,
   );
   const downloadPromise = phone.waitForEvent('download');
   await phone.locator('#recording-list a').click();
@@ -408,6 +423,8 @@ try {
   assert.equal(await phone.locator('#voice-effect').inputValue(), 'cartoon');
   await receiver.evaluate(() => window.refreshReceivedStream());
   await receiver.waitForFunction(() => window.receivedPeak() > 640 && window.receivedPeak() < 680);
+  if (!(await receiver.locator('#phone-dialog').isVisible()))
+    await receiver.locator('#open-phone').click();
   await receiver.locator('#disconnect').click();
   await phone.waitForFunction(
     () =>

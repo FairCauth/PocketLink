@@ -50,7 +50,9 @@ try {
                   {
                     kind: 'audiooutput',
                     deviceId: 'cable-playback',
-                    label: 'CABLE Input (VB-Audio Virtual Cable)',
+                    label: routing.renamed
+                      ? '扬声器 (VB-Audio Virtual Cable)'
+                      : 'CABLE Input (VB-Audio Virtual Cable)',
                   },
                 ]
               : []),
@@ -71,6 +73,7 @@ try {
   });
   const open = async () => {
     await page.goto(base + '/receiver');
+    if (await page.locator('#phone-dialog').isVisible()) await page.locator('#close-phone').click();
     await page.locator('#open-settings').click();
     assert.equal(await page.evaluate(() => routing.captures), 0);
   };
@@ -108,6 +111,7 @@ try {
     routing.permission = true;
   });
   await page.locator('#close-settings').click();
+  if (!(await page.locator('#phone-dialog').isVisible())) await page.locator('#open-phone').click();
   await page.locator('#create-code').click();
   await page.waitForFunction(() =>
     /^\d{4} \d{4}$/.test(document.getElementById('receiver-code').textContent),
@@ -125,6 +129,7 @@ try {
     routing.installed = false;
   });
   await page.locator('#close-settings').click();
+  if (!(await page.locator('#phone-dialog').isVisible())) await page.locator('#open-phone').click();
   await page.locator('#create-code').click();
   await page.waitForFunction(() =>
     document.getElementById('receiver-status').textContent.includes('恢复输出设备'),
@@ -142,6 +147,7 @@ try {
   await page.evaluate(() => {
     routing.installed = true;
   });
+  if (await page.locator('#phone-dialog').isVisible()) await page.locator('#close-phone').click();
   await page.locator('#open-settings').click();
   await route();
   await page.locator('#use-speakers').click();

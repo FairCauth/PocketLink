@@ -36,3 +36,11 @@ test-results/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Xcode local builds and signing state
+ios/build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.ipa
+*.dSYM/

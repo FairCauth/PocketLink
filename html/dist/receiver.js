@@ -1,9 +1,13 @@
 import { renderIcons } from '/icons.js';
-import { AudioLink } from '/connection.js';
+import { ReceiverLink } from '/receiver-link.js';
+import { ReceiverMixer } from '/receiver-mixer.js';
+import { RemoteSoundboard } from '/remote-soundboard.js';
+import { VOICE_PRESETS, VOICES } from '/voice-dsp.js';
 renderIcons();
 const $ = (id) => document.getElementById(id);
-const link = new AudioLink();
+const link = new ReceiverLink();
 const audio = $('remote-audio');
+let connectionMode = new URLSearchParams(location.search).get('mode') === 'usb' ? 'usb' : 'lan';
 audio.volume = 0.7;
 let pairCode = '',
   expiresAt = 0,
@@ -14,6 +18,94 @@ let meterContext,
   meterSource,
   meterFrame,
   serviceGeneration = 0;
+let mixer,
+  mixGeneration = 0;
+let voiceChoice = 'original';
+let devicesGeneration = 0;
+let phoneStream = null,
+  inputEnabled = false,
+  inputPending = false,
+  studioPromise,
+  disposed = false;
+let availableInputs = [];
+const inputDevices = (devices) =>
+  devices.filter(
+    (device) =>
+      device.kind === 'audioinput' &&
+      device.deviceId &&
+      device.label &&
+      !['default', 'communications'].includes(device.deviceId) &&
+      !/CABLE (Input|Output)|VB-Audio Virtual Cable|PocketLink 麦克风/i.test(device.label),
+  );
+function renderVoices() {
+  $('receiver-voice').value = voiceChoice;
+  $('receiver-voice').disabled = false;
+}
+async function setReceiverVoice(id) {
+  if (!VOICES.includes(id)) throw new Error('未知变声预设');
+  const target = await ensureStudio();
+  await target.setVoice(id);
+}
+const remoteSounds = new RemoteSoundboard(
+  () => mixer,
+  (message) => {
+    $('sound-status').textContent = message;
+  },
+  {
+    state: () => ({
+      selected: voiceChoice,
+      presets: VOICE_PRESETS.map(({ id, name }) => ({ id, name })),
+    }),
+    set: setReceiverVoice,
+    input: () => ({ phone: $('input-device').value === 'phone', enabled: inputEnabled }),
+  },
+  ensureStudio,
+);
+$('receiver-voice').replaceChildren(...VOICE_PRESETS.map(({ id, name }) => new Option(name, id)));
+$('receiver-voice').addEventListener('change', () => {
+  void setReceiverVoice($('receiver-voice').value).catch((error) => {
+    $('input-status').textContent = error.message;
+    renderVoices();
+  });
+});
+link.addEventListener('control', ({ detail }) => remoteSounds.attach(detail.channel, serviceBase));
+link.addEventListener('sounds-changed', () => void remoteSounds.refresh?.());
+$('sound-files').addEventListener('change', async () => {
+  const picker = $('sound-files');
+  const files = [...picker.files];
+  if (!files.length) return;
+  picker.disabled = true;
+  let done = 0;
+  try {
+    const response = await fetch(`${serviceBase}/api/config`);
+    const { soundUploadToken } = await response.json();
+    if (!soundUploadToken) throw new Error('请在运行 PocketLink 服务的电脑上添加音效。');
+    for (const file of files) {
+      if (!/\.(mp3|wav|m4a)$/i.test(file.name) || !file.size || file.size > 10 * 1024 * 1024)
+        throw new Error(`${file.name}：请选择不超过 10 MB 的 MP3、WAV 或 M4A。`);
+      $('sound-upload-status').textContent = `正在添加 ${file.name}…`;
+      const result = await fetch(
+        `${serviceBase}/api/sounds?name=${encodeURIComponent(file.name)}`,
+        {
+          method: 'POST',
+          headers: { 'X-PocketLink-Upload': soundUploadToken },
+          body: file,
+          signal: AbortSignal.timeout(30000),
+        },
+      );
+      const value = await result.json();
+      if (!result.ok) throw new Error(value.error || '音效添加失败。');
+      ++done;
+    }
+    $('sound-upload-status').textContent = `已添加 ${done} 个音效，手机列表已更新。`;
+    void remoteSounds.refresh?.();
+  } catch (error) {
+    $('sound-upload-status').textContent = `已添加 ${done} 个。${error.message}`;
+  } finally {
+    picker.disabled = false;
+    picker.value = '';
+  }
+});
 const virtualMicKey = 'pocketlink.virtualMic';
 let preferVirtualMic = false;
 try {
@@ -21,7 +113,9 @@ try {
 } catch {
   /* Storage may be unavailable. */
 }
-const isCableInput = (label) => /^CABLE Input\b/i.test(label || '');
+const isCableInput = (label) =>
+  /^CABLE Input\b/i.test(label || '') ||
+  (/\(VB-Audio Virtual Cable\)$/i.test(label || '') && !/16\s*Ch/i.test(label));
 const findCable = (devices) =>
   devices.find(
     (device) =>
@@ -36,13 +130,13 @@ function renderOutput() {
   $('use-virtual-mic').setAttribute('aria-pressed', String(preferVirtualMic));
   $('use-speakers').setAttribute('aria-pressed', String(!preferVirtualMic && !custom));
   $('output-route').textContent = preferVirtualMic
-    ? `系统麦克风${outputRestored ? '' : ' · 连接时恢复'}`
+    ? `系统麦克风${outputRestored ? '' : ' · 启用时恢复'}`
     : custom
       ? '自定义播放设备'
       : '电脑试听';
   $('mic-device-hint').textContent = microphoneName
     ? `在其他软件中，选择麦克风「${microphoneName}」。`
-    : '将手机声音用于会议、游戏等软件。';
+    : '将处理后的声音用于会议、游戏等软件。';
 }
 function status(message, error = false) {
   $('receiver-status').textContent = message;
@@ -52,19 +146,110 @@ function status(message, error = false) {
 function settingsStatus(text) {
   $('settings-status').textContent = text;
 }
-function clearAudio() {
-  cancelAnimationFrame(meterFrame);
-  meterSource?.disconnect();
-  meterSource = null;
-  analyser = null;
-  audio.pause();
-  audio.srcObject = null;
-  $('resume-audio').disabled = true;
-  $('receiver-level-bar').style.width = '0';
-  $('audio-status').textContent = '等待手机音频';
+function renderAudioState() {
+  remoteSounds.sendInputState();
+  const connected = ['connected', 'reconnecting'].includes(link.status);
+  $('pair-section').hidden = connected;
+  $('open-phone').textContent = connected ? '手机已连接' : '连接手机';
+  $('input-toggle').textContent = inputPending
+    ? '取消开启'
+    : inputEnabled
+      ? '关闭麦克风'
+      : '开启麦克风';
+  $('input-toggle').setAttribute('aria-pressed', String(inputEnabled || inputPending));
+  $('input-toggle').disabled = $('input-device').value === 'none';
 }
+function clearAudio({ force = false } = {}) {
+  phoneStream = null;
+  remoteSounds.detach();
+  if ($('input-device').value === 'phone') {
+    stopInput();
+    $('input-device').value = 'none';
+    $('input-status').textContent = '手机已断开，请选择其他输入。音效仍可使用。';
+  }
+  renderInputs();
+  if (force) {
+    disposed = true;
+    stopInput();
+    remoteSounds.stop();
+    mixer?.close();
+    mixer = null;
+    cancelAnimationFrame(meterFrame);
+    meterSource?.disconnect();
+    meterSource = analyser = null;
+    audio.pause();
+    audio.srcObject = null;
+  }
+  renderAudioState();
+}
+async function ensureStudio() {
+  if (disposed) throw new Error('页面已关闭');
+  if (studioPromise) return studioPromise;
+  if (mixer) {
+    await prepareMeter();
+    return mixer;
+  }
+  studioPromise = (async () => {
+    await prepareMeter();
+    if (preferVirtualMic && !outputRestored) {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cable = findCable(devices);
+      if (!cable) throw new Error('请先打开设置，点击「系统麦克风」恢复输出设备。');
+      await refreshDevices();
+      if (!(await setOutput(cable.deviceId)))
+        throw new Error('虚拟麦克风输出恢复失败，请重新选择设备。');
+    }
+    if (disposed) throw new Error('页面已关闭');
+    const target = (mixer = new ReceiverMixer(meterContext, null));
+    target.setGain(Number($('input-gain').value) / 100);
+    target.addEventListener('voice', () => {
+      if (mixer !== target || target.closed) return;
+      voiceChoice = target.voice;
+      renderVoices();
+      remoteSounds.sendVoiceState();
+    });
+    target.addEventListener('voice-error', () => {
+      $('input-status').textContent = '变声处理已中断，已恢复原声。';
+    });
+    target.addEventListener('ended', () => {
+      stopInput();
+      $('input-status').textContent = '麦克风已断开，请重新选择输入。音效仍可使用。';
+    });
+    audio.srcObject = target.stream;
+    startMeter(target.stream);
+    $('resume-audio').disabled = false;
+    await playAudio();
+    return target;
+  })();
+  try {
+    return await studioPromise;
+  } finally {
+    studioPromise = null;
+  }
+}
+function renderSounds() {
+  $('sound-list').replaceChildren(
+    ...remoteSounds.sounds.map(({ id, name }) => {
+      const button = document.createElement('button');
+      button.className = 'sound-tile';
+      button.textContent = name;
+      button.setAttribute('aria-pressed', String(remoteSounds.playing === id));
+      button.addEventListener('click', () => void remoteSounds.play(id));
+      return button;
+    }),
+  );
+  $('sound-empty').hidden = remoteSounds.sounds.length > 0;
+  $('sound-status').textContent = remoteSounds.playing
+    ? `正在播放：${remoteSounds.sounds.find((s) => s.id === remoteSounds.playing)?.name || '音效'}`
+    : '';
+}
+remoteSounds.addEventListener('change', renderSounds);
+$('stop-sound').addEventListener('click', () => remoteSounds.stop());
+$('refresh-sounds').addEventListener('click', () => void remoteSounds.refresh(serviceBase));
 async function prepareMeter() {
-  if (!meterContext || meterContext.state === 'closed') meterContext = new AudioContext();
+  if (!meterContext || meterContext.state === 'closed')
+    // The mixer needs a clock even when Windows has no default speaker attached.
+    meterContext = new AudioContext({ sinkId: { type: 'none' } });
   if (meterContext.state !== 'running') await meterContext.resume();
 }
 function startMeter(stream) {
@@ -89,7 +274,7 @@ async function playAudio() {
   await prepareMeter();
   try {
     await audio.play();
-    $('audio-status').textContent = '正在播放手机音频';
+    $('audio-status').textContent = '音频输出已开启';
     $('resume-audio').textContent = '暂停播放';
   } catch {
     $('audio-status').textContent = '点击下方按钮开始播放';
@@ -99,7 +284,14 @@ async function playAudio() {
 function showAddress() {
   const index = Number($('phone-network').value || 0);
   const phoneURL = config?.phoneURLs?.[index];
-  if (!phoneURL || !pairCode || expiresAt <= Date.now()) {
+  $('connect-lan').setAttribute('aria-pressed', String(connectionMode === 'lan'));
+  $('connect-usb').setAttribute('aria-pressed', String(connectionMode === 'usb'));
+  $('usb-hint').hidden = connectionMode !== 'usb';
+  $('usb-hint').textContent =
+    '插线并信任电脑，在 iOS App 选择 USB 并输入配对码。无需热点或局域网。';
+  if (link.status === 'idle')
+    $('create-code').textContent = connectionMode === 'usb' ? '创建 USB 配对码' : '创建配对码';
+  if (!phoneURL || !pairCode || expiresAt <= Date.now() || connectionMode === 'usb') {
     $('phone-entry').hidden = true;
     $('phone-qr').removeAttribute('src');
     return;
@@ -108,7 +300,7 @@ function showAddress() {
   $('phone-url').href = phoneURL;
   $('phone-url').textContent = phoneURL;
   $('phone-qr').src =
-    `${serviceBase}/api/qr.svg?index=${index}&code=${encodeURIComponent(pairCode)}`;
+    `${serviceBase}/api/qr.svg?index=${index}&code=${encodeURIComponent(pairCode)}${connectionMode === 'usb' ? '&mode=usb' : ''}`;
   const setupURL = config.setupURLs?.[index];
   $('open-setup').hidden = !setupURL;
   if (setupURL) {
@@ -121,23 +313,47 @@ function showAddress() {
 }
 function showConfig(value) {
   config = value;
-  const urls = (config.phoneURLs || []).filter((value) => {
-    try {
-      return ['https:', 'http:'].includes(new URL(value).protocol);
-    } catch {
-      return false;
-    }
-  });
-  config.phoneURLs = urls;
-  $('phone-network').replaceChildren(...urls.map((url, index) => new Option(url, String(index))));
-  $('network-field').hidden = urls.length < 2;
+  const entries = (config.phoneURLs || [])
+    .map((url, index) => ({ url, index }))
+    .filter(({ url }) => {
+      try {
+        return ['https:', 'http:'].includes(new URL(url).protocol);
+      } catch {
+        return false;
+      }
+    });
+  $('phone-network').replaceChildren(
+    ...entries.map(
+      ({ url, index }) =>
+        new Option(
+          `${config.phoneNetworks?.[index]?.kind === 'usb' ? '共享网络 · ' : ''}${url}`,
+          String(index),
+        ),
+    ),
+  );
+  $('network-field').hidden = entries.length < 2;
+  selectConnectionMode(connectionMode);
+}
+function selectConnectionMode(mode) {
+  if (mode !== connectionMode && link.status !== 'idle') {
+    ++serviceGeneration;
+    link.close();
+  }
+  connectionMode = mode;
+  const index = config?.phoneNetworks?.findIndex((item) =>
+    mode === 'usb' ? item.kind === 'usb' : item.kind !== 'usb',
+  );
+  if (index >= 0) $('phone-network').value = String(index);
   showAddress();
 }
+$('connect-lan').addEventListener('click', () => selectConnectionMode('lan'));
+$('connect-usb').addEventListener('click', () => selectConnectionMode('usb'));
+showAddress();
 $('phone-network').addEventListener('change', showAddress);
 $('create-code').addEventListener('click', async () => {
   const generation = ++serviceGeneration;
   try {
-    await prepareMeter();
+    await ensureStudio();
     // Restore the routing before a phone can connect and begin playback.
     // Never silently send a remembered virtual microphone to the speakers.
     if (preferVirtualMic) {
@@ -149,7 +365,12 @@ $('create-code').addEventListener('click', async () => {
         throw new Error('虚拟麦克风输出恢复失败，请在设置中重新选择设备。');
     }
     if (generation !== serviceGeneration) return;
-    await link.open({ role: 'receiver', server: $('receiver-server').value.trim() });
+    await link.open({
+      role: 'receiver',
+      server: $('receiver-server').value.trim(),
+      mode: connectionMode,
+      context: meterContext,
+    });
     if (generation !== serviceGeneration || link.status === 'idle') return;
     serviceBase = new URL($('receiver-server').value.trim() || location.origin).origin;
     showConfig(link.config);
@@ -167,8 +388,6 @@ link.addEventListener('code', (e) => {
 link.addEventListener('status', (e) => {
   const state = e.detail.status;
   const connected = state === 'connected' || state === 'reconnecting';
-  $('pair-section').hidden = connected;
-  $('audio-section').hidden = !connected;
   $('create-code').disabled = ['connecting', 'negotiating', 'connected'].includes(state);
   $('create-code').classList.toggle('waiting', state === 'waiting');
   $('create-code').textContent =
@@ -180,7 +399,7 @@ link.addEventListener('status', (e) => {
           ? '刷新配对码'
           : '创建配对码';
   $('disconnect').hidden = state === 'idle';
-  $('disconnect').textContent = connected ? '断开连接' : '取消配对';
+  $('disconnect').textContent = connected ? '断开手机' : '取消配对';
   $('receiver-server').disabled = state !== 'idle';
   if (state === 'idle') {
     pairCode = '';
@@ -191,28 +410,29 @@ link.addEventListener('status', (e) => {
     clearAudio();
   }
   if (state === 'waiting') clearAudio();
+  if (state === 'connected') $('phone-dialog').close();
+  renderAudioState();
   const labels = {
     idle: '会话已关闭',
     connecting: '正在连接…',
     waiting: '等待手机扫码或输入配对码…',
     negotiating: '正在建立音频连接…',
-    connected: '已连接 · 正在接收手机音频',
+    connected: '手机已连接',
     reconnecting: '音频连接中断，正在恢复…',
   };
-  status(labels[state] || state);
+  status(
+    state === 'waiting' && connectionMode === 'usb'
+      ? '等待 iOS App 输入配对码并通过数据线连接…'
+      : labels[state] || state,
+  );
 });
 link.addEventListener('error', (e) => status(e.detail.message, true));
 link.addEventListener('notice', (e) => status(e.detail.message));
-link.addEventListener('stream', async (e) => {
-  try {
-    audio.srcObject = e.detail.stream;
-    $('resume-audio').disabled = false;
-    startMeter(e.detail.stream);
-    await playAudio();
-    await refreshDevices();
-  } catch {
-    status('音频播放暂不可用，请点击播放重试。', true);
-  }
+link.addEventListener('stream', (e) => {
+  phoneStream = e.detail.stream;
+  if (inputEnabled && $('input-device').value === 'phone') mixer?.setRemote(phoneStream);
+  renderInputs();
+  renderAudioState();
 });
 $('disconnect').addEventListener('click', () => {
   ++serviceGeneration;
@@ -245,9 +465,23 @@ $('output-volume').addEventListener('input', () => {
 });
 async function refreshDevices() {
   if (!navigator.mediaDevices?.enumerateDevices) return;
+  const generation = ++devicesGeneration;
   try {
     const selected = audio.sinkId || 'default';
     const devices = await navigator.mediaDevices.enumerateDevices();
+    if (generation !== devicesGeneration) return;
+    availableInputs = inputDevices(devices);
+    const activeId = $('input-device').value;
+    if (
+      activeId !== 'none' &&
+      activeId !== 'phone' &&
+      !availableInputs.some((device) => device.deviceId === activeId)
+    ) {
+      stopInput();
+      $('input-device').value = 'none';
+      $('input-status').textContent = '当前麦克风已拔出，请选择设备后重新开启。';
+    }
+    renderInputs();
     const microphone =
       devices.find(
         (device) =>
@@ -300,7 +534,7 @@ async function setOutput(id) {
     return false;
   }
 }
-$('use-virtual-mic').addEventListener('click', async () => {
+async function useVirtualMicrophone() {
   const button = $('use-virtual-mic');
   if (!audio.setSinkId || !navigator.mediaDevices?.enumerateDevices) {
     settingsStatus(
@@ -331,7 +565,8 @@ $('use-virtual-mic').addEventListener('click', async () => {
     }
     if (await setOutput(cable.deviceId)) {
       $('output-device').value = cable.deviceId;
-      settingsStatus('已启用系统麦克风，下次连接自动恢复。');
+      settingsStatus('已启用系统麦克风，下次启用音频时自动恢复。');
+      return true;
     }
   } catch {
     settingsStatus(
@@ -341,7 +576,8 @@ $('use-virtual-mic').addEventListener('click', async () => {
     button.disabled = false;
     $('use-speakers').disabled = false;
   }
-});
+}
+$('use-virtual-mic').addEventListener('click', useVirtualMicrophone);
 $('use-speakers').addEventListener('click', async () => {
   $('use-speakers').disabled = true;
   $('use-virtual-mic').disabled = true;
@@ -367,8 +603,92 @@ $('choose-output').addEventListener('click', async () => {
     settingsStatus('也可在 Windows 声音设置中指定浏览器的输出设备。');
   }
 });
-for (const name of ['settings', 'setup']) {
-  $(`open-${name}`).addEventListener('click', () => $(`${name}-dialog`).showModal());
+function renderInputs() {
+  const previous = $('input-device').value || 'none';
+  const options = [new Option('仅音效（无麦克风）', 'none')];
+  for (const device of availableInputs) options.push(new Option(device.label, device.deviceId));
+  if (phoneStream) options.push(new Option('手机', 'phone'));
+  $('input-device').replaceChildren(...options);
+  $('input-device').value = options.some((option) => option.value === previous) ? previous : 'none';
+  renderAudioState();
+}
+function stopInput() {
+  ++mixGeneration;
+  inputEnabled = inputPending = false;
+  mixer?.stopLocal();
+  mixer?.setRemote(null);
+  $('input-status').textContent = '';
+  renderAudioState();
+}
+async function startInput() {
+  stopInput();
+  const id = $('input-device').value;
+  if (id === 'none') return;
+  const generation = mixGeneration;
+  inputPending = true;
+  renderAudioState();
+  $('input-status').textContent = '正在开启麦克风…';
+  try {
+    const target = await ensureStudio();
+    if (generation !== mixGeneration) return;
+    if (id === 'phone') {
+      if (!phoneStream) throw new Error('手机已断开，请重新选择输入。');
+      target.setRemote(phoneStream);
+    } else {
+      if (!(await target.startLocal(id))) return;
+      if (generation !== mixGeneration) return;
+    }
+    inputEnabled = true;
+    $('input-status').textContent = id === 'phone' ? '请在手机上开启麦克风。' : '';
+  } catch (error) {
+    if (generation !== mixGeneration) return;
+    stopInput();
+    $('input-status').textContent =
+      error.name === 'NotAllowedError' ? '请允许浏览器使用麦克风，音效仍可使用。' : error.message;
+  } finally {
+    if (generation === mixGeneration) inputPending = false;
+    renderAudioState();
+  }
+}
+$('input-toggle').addEventListener('click', () => {
+  if (inputEnabled || inputPending) stopInput();
+  else void startInput();
+});
+$('input-device').addEventListener('change', () => {
+  const wasActive = inputEnabled || inputPending;
+  stopInput();
+  if (wasActive) void startInput();
+  else $('input-status').textContent = $('input-device').value === 'none' ? '' : '';
+});
+$('refresh-inputs').addEventListener('click', async () => {
+  const button = $('refresh-inputs');
+  button.disabled = true;
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    if (!devices.some((d) => d.kind === 'audioinput' && d.label)) {
+      const permission = await navigator.mediaDevices.getUserMedia({ audio: true });
+      permission.getTracks().forEach((track) => track.stop());
+    }
+    await refreshDevices();
+    $('input-status').textContent = availableInputs.length
+      ? ''
+      : '未找到电脑麦克风，可连接设备后刷新。';
+  } catch {
+    $('input-status').textContent = '无法读取麦克风，请允许浏览器权限后重试。';
+  } finally {
+    button.disabled = false;
+  }
+});
+$('input-gain').addEventListener('input', () => {
+  const value = Number($('input-gain').value);
+  mixer?.setGain(value / 100);
+  $('input-gain-value').textContent = value + '%';
+});
+for (const name of ['settings', 'setup', 'phone']) {
+  $(`open-${name}`).addEventListener('click', () => {
+    $(`${name}-dialog`).showModal();
+    if (name === 'settings') void refreshDevices();
+  });
   $(`close-${name}`).addEventListener('click', () => $(`${name}-dialog`).close());
 }
 if (!audio.setSinkId) {
@@ -376,8 +696,12 @@ if (!audio.setSinkId) {
   $('choose-output').textContent = '在系统中选择输出';
 }
 renderOutput();
+renderVoices();
+renderAudioState();
+void remoteSounds.refresh();
 refreshDevices();
 navigator.mediaDevices?.addEventListener('devicechange', refreshDevices);
+window.addEventListener('focus', refreshDevices);
 setInterval(() => {
   if (link.status === 'waiting' && expiresAt) {
     const seconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
@@ -391,5 +715,6 @@ setInterval(() => {
 }, 1000);
 window.addEventListener('pagehide', () => {
   link.close();
+  clearAudio({ force: true });
   void meterContext?.close();
 });

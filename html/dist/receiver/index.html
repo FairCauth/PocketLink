@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
     <meta name="theme-color" content="#111512" />
-    <title>PocketLink · 接收端</title>
+    <title>PocketLink · 音频工作台</title>
     <link rel="stylesheet" href="/sender.css" />
     <link rel="stylesheet" href="/receiver.css" />
     <script type="module" src="/receiver.js"></script>
@@ -15,50 +15,119 @@
         <span class="brand"
           ><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span
           >PocketLink</span
-        ><button class="icon-button" id="open-settings" aria-label="设置">
-          <span data-icon="sliders"></span>
-        </button>
+        >
+        <div class="header-actions">
+          <button id="open-phone" class="text-button">连接手机</button
+          ><button class="icon-button" id="open-settings" aria-label="设置">
+            <span data-icon="sliders"></span>
+          </button>
+        </div>
       </header>
       <main>
-        <section class="pair-section" id="pair-section">
-          <h1>连接手机</h1>
-          <p class="subtitle">扫码直连，或打开网址输入配对码</p>
-          <div class="pair-code-row">
-            <output id="receiver-code" aria-live="polite">—— ——</output
-            ><button class="icon-button" id="copy-code" aria-label="复制配对码" disabled>
-              <span data-icon="copy"></span>
-            </button>
+        <div class="studio-layout">
+          <div class="studio-primary">
+            <section id="audio-section" class="studio-card">
+              <div class="card-heading">
+                <h1 id="audio-heading">音频</h1>
+                <span id="output-route" class="route-badge" role="status">电脑试听</span>
+              </div>
+              <div class="label-row">
+                <label for="input-device">麦克风输入</label
+                ><button id="refresh-inputs" class="text-button">刷新设备</button>
+              </div>
+              <div class="source-row">
+                <select id="input-device">
+                  <option value="none">仅音效（无麦克风）</option></select
+                ><button id="input-toggle" class="primary-button" aria-pressed="false" disabled>
+                  开启麦克风
+                </button>
+              </div>
+              <p id="input-status" class="setting-hint" role="status"></p>
+              <div class="voice-row">
+                <div>
+                  <label for="receiver-voice">变声</label
+                  ><select id="receiver-voice"></select>
+                </div>
+                <div>
+                  <div class="label-row">
+                    <label for="input-gain">麦克风音量</label
+                    ><output id="input-gain-value">100%</output>
+                  </div>
+                  <input id="input-gain" type="range" min="0" max="200" step="5" value="100" />
+                </div>
+              </div>
+              <div class="output-strip">
+                <div class="label-row">
+                  <span>总输出</span><span id="audio-status" role="status">准备就绪</span>
+                </div>
+                <div class="receiver-level" aria-label="输出电平">
+                  <span id="receiver-level-bar"></span>
+                </div>
+                <div class="label-row">
+                  <label for="output-volume">输出音量</label
+                  ><output id="output-volume-value">70%</output>
+                </div>
+                <input id="output-volume" type="range" min="0" max="100" value="70" /><button
+                  class="secondary-button"
+                  id="resume-audio"
+                  disabled
+                >
+                  播放音频
+                </button>
+              </div>
+            </section>
+            <section class="studio-card sound-card" aria-labelledby="sound-title">
+              <div class="card-heading">
+                <h2 id="sound-title">音效板</h2>
+                <div class="sound-actions">
+                  <button id="refresh-sounds" class="text-button">刷新</button
+                  ><button id="stop-sound" class="text-button">停止音效</button>
+                </div>
+              </div>
+              <div id="sound-list" class="sound-grid"></div>
+              <p id="sound-empty" class="empty-state">暂无音效</p>
+              <p id="sound-status" class="setting-hint" role="status"></p>
+              <label for="sound-files" class="file-label">添加音效</label
+              ><input id="sound-files" type="file" accept=".mp3,.wav,.m4a" multiple />
+              <p id="sound-upload-status" class="setting-hint" role="status"></p>
+            </section>
           </div>
-          <button class="primary-button" id="create-code">创建配对码</button>
-          <div id="phone-entry" hidden>
-            <p class="connection-label">扫码直接连接</p>
-            <img id="phone-qr" width="176" height="176" alt="扫码自动配对电脑" />
-            <p class="connection-label manual-label">或打开网址，输入上方配对码</p>
-            <a id="phone-url" target="_blank" rel="noopener noreferrer"></a>
-            <button id="open-setup" class="text-button" hidden>首次使用 iPhone？</button>
-          </div>
-        </section>
-        <section id="audio-section" hidden>
-          <div class="connected-heading">
-            <span class="status-dot"></span>
-            <h1>手机已连接</h1>
-          </div>
-          <p id="audio-status" class="subtitle" role="status">等待手机音频</p>
-          <p id="output-route" class="setting-hint" role="status">电脑试听</p>
-          <div class="receiver-level" aria-label="接收音量">
-            <span id="receiver-level-bar"></span>
-          </div>
-          <div class="label-row">
-            <label for="output-volume">音量</label><output id="output-volume-value">70%</output>
-          </div>
-          <input id="output-volume" type="range" min="0" max="100" value="70" />
-          <button class="secondary-button" id="resume-audio" disabled>播放音频</button>
-        </section>
-        <p id="receiver-status" class="message" role="status">点击创建配对码</p>
-        <button class="text-button" id="disconnect" hidden>断开连接</button>
+        </div>
         <audio id="remote-audio" autoplay playsinline></audio>
       </main>
     </div>
+    <dialog id="phone-dialog" aria-labelledby="phone-title">
+      <div class="dialog-header">
+        <h2 id="phone-title">连接手机</h2>
+        <button id="close-phone" class="icon-button" aria-label="关闭手机连接">
+          <span data-icon="close"></span>
+        </button>
+      </div>
+
+      <section class="pair-section" id="pair-section">
+        <div class="audio-modes" role="group" aria-label="连接方式">
+          <button class="secondary-button" id="connect-lan" aria-pressed="true">无线</button>
+          <button class="secondary-button" id="connect-usb" aria-pressed="false">USB 有线</button>
+        </div>
+        <p id="usb-hint" class="setting-hint" role="status" hidden></p>
+        <div class="pair-code-row">
+          <output id="receiver-code" aria-live="polite">—— ——</output
+          ><button class="icon-button" id="copy-code" aria-label="复制配对码" disabled>
+            <span data-icon="copy"></span>
+          </button>
+        </div>
+        <button class="primary-button" id="create-code">创建配对码</button>
+        <div id="phone-entry" hidden>
+          <p class="connection-label">扫码直接连接</p>
+          <img id="phone-qr" width="176" height="176" alt="扫码自动配对电脑" />
+          <p class="connection-label manual-label">或打开网址，输入上方配对码</p>
+          <a id="phone-url" target="_blank" rel="noopener noreferrer"></a>
+          <button id="open-setup" class="text-button" hidden>首次使用 iPhone？</button>
+        </div>
+      </section>
+      <p id="receiver-status" class="message" role="status">手机未连接</p>
+      <button class="text-button" id="disconnect" hidden>断开手机</button>
+    </dialog>
     <dialog id="settings-dialog" aria-labelledby="settings-title">
       <div class="dialog-header">
         <h2 id="settings-title">设置</h2>
@@ -72,7 +141,7 @@
         </button>
         <button class="secondary-button" id="use-speakers" aria-pressed="true">电脑试听</button>
       </div>
-      <p id="mic-device-hint" class="setting-hint">将手机声音用于会议、游戏等软件。</p>
+      <p id="mic-device-hint" class="setting-hint">将处理后的声音用于会议、游戏等软件。</p>
       <p id="settings-status" class="message" role="status"></p>
       <details id="advanced-settings">
         <summary>高级设置</summary>
@@ -95,8 +164,8 @@
           >。浏览器可能请求麦克风权限以读取设备列表，读取后立即停止采集。
         </p>
         <p class="setting-hint">
-          设备改名：Windows 设置 → 系统 → 声音 → 输入 → CABLE Output → 重命名为「PocketLink
-          麦克风」。
+          启动时会自动将 CABLE Output 命名为「PocketLink 麦克风」。若未完成，可运行
+          Start-PocketLink.cmd。改名无需管理员弹窗，安装驱动时才需要授权。
         </p>
       </details>
     </dialog>

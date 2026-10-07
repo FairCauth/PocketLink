@@ -93,8 +93,10 @@ test('pairs one phone, relays only within its room, recovers after disconnect', 
   phone.ws.close();
   assert.equal((await desktop.next()).type, 'peer-left');
   other.send({ type: 'join', code: created.code, mode: 'usb' });
+  assert.equal((await other.next()).type, 'error');
+  other.send({ type: 'join', code: created.code, mode: 'lan' });
   assert.equal((await other.next()).type, 'joined');
-  assert.equal((await desktop.next()).mode, 'usb');
+  assert.equal((await desktop.next()).mode, 'lan');
   desktop.ws.close();
   assert.equal((await other.next()).type, 'peer-left');
   assert.equal(app.rooms.size, 0);

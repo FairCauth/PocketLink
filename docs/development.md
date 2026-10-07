@@ -19,9 +19,13 @@ npm run dev
 
 ```text
 client/                  电脑接收端 HTML / JavaScript 源码
+ios/                     原生 iPhone App、Xcode 工程及 Mac 验证脚本
 html/dist/               手机端源码、共享静态资源与接收端发布副本
   app.js                 手机页面状态与操作
-  audio-engine.js        采集、增益、变声和录音
+  audio-engine.js        手机采集、降噪、增益和本地录音
+  phone-controller.js    手机网页遥控电脑音效、变声与状态同步
+  receiver-mixer.js      电脑麦克风与远端音效混音
+  remote-soundboard.js   原生 App 数据通道音效控制（电脑播放）
   connection.js          WebSocket 配对与 WebRTC 连接
   voice-dsp.js           音效 DSP
   voice-worklet.js       AudioWorklet 处理器
@@ -33,7 +37,7 @@ tests/                   Node 测试、浏览器回归与硬件诊断
 docs/                    使用、部署和开发说明
 .github/workflows/       GitHub Actions 自动检查
 Start-PocketLink.cmd     一键启动
-Stop-PocketLink.cmd      停止脚本管理的服务
+Uninstall-PocketLink-Driver.cmd  卸载共享音频驱动（程序退出用 Ctrl+C）
 ```
 
 `html/dist/` 是当前项目实际维护的静态源码目录，不是可随意删除的构建缓存。项目使用原生 ES Modules，无前端框架或打包步骤。
@@ -82,6 +86,8 @@ npm run test:ui
 - `receiver-output-ui.mjs`：模拟输出设备，检查系统麦克风路由、权限和偏好恢复。
 - `pairing-ui.mjs`：合成麦克风、二维码配对、真实 WebRTC 传音及失败重试。
 - `sender-ui.mjs`：手机页面、静音、增益、变声、录音、音轨释放及响应式布局。
+- `mixer-ui.mjs`：独立工作台、电脑麦克风与音效输出、输入过滤、权限失败和音轨释放。
+- `browser-control-ui.mjs`：真实手机网页遥控电脑变声与音效、无需手机采集、双向状态同步、权限拒绝与断线保持。
 
 测试自行启动临时本机服务，使用合成音源，不采集真实麦克风；截图和测试音频输出到忽略的 `artifacts/`。不要同时运行多份会写相同截图文件的测试。
 
@@ -133,4 +139,6 @@ npm.cmd start
 Remove-Item Env:ENABLE_BROWSER_TESTS
 ```
 
-iPhone Safari 权限与证书安装、外网 TURN、USB 网络共享及 Windows 虚拟声卡仍需在真实设备上验证。Chromium 自动化不能代替这些检查。
+iPhone Safari 权限与证书安装、外网 TURN、原生 USB 直连及 Windows 虚拟声卡仍需在真实设备上验证。Chromium 自动化不能代替这些检查。
+
+USB 直连：`server/usbmux.mjs` 访问 Apple 服务，`server/usb-bridge.mjs` 桥接本机接收页，`ios/PocketLink/USBClient.swift` 在手机回环监听与采集 PCM。`npm run test:usb` 用模拟 Apple 服务与真实浏览器验证 PCM、变声和断线，不代表已通过真机验收。协议和安装步骤见 [USB 指南](usb.md)。

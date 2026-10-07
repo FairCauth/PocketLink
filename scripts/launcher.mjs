@@ -6,6 +6,7 @@ import { X509Certificate, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { certificateNeedsRenewal } from './certificates.mjs';
+import { discoverNetworks } from './networks.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -171,6 +172,10 @@ async function main() {
   }
   const ips = await addresses(),
     names = ['localhost', '127.0.0.1', '::1', ...ips];
+  const detected = await discoverNetworks();
+  const usbAddresses = detected.networks
+    .filter((item) => item.kind === 'usb')
+    .map((item) => item.address);
   let cert, key;
   try {
     cert = await readFile(certFile);
@@ -182,6 +187,8 @@ async function main() {
       JSON.stringify(
         {
           addresses: ips,
+          usbAddresses,
+          networkDiagnostic: detected.diagnostic,
           rootDirectory: caDir,
           rootFingerprint: ca ? new X509Certificate(ca).fingerprint256 : null,
           certificateNeedsRenewal: renew,
@@ -222,9 +229,10 @@ async function main() {
         !renew &&
         old.port === port &&
         old.setupPort === setupPort &&
+        JSON.stringify(old.usbAddresses || []) === JSON.stringify(usbAddresses) &&
         JSON.stringify(old.addresses) === JSON.stringify(ips)
       ) {
-        console.log('PocketLink 已在运行，正在打开接收端。');
+        console.log('PocketLink 已在运行，正在打开音频工作台。');
         browser(port);
         return;
       }
@@ -296,6 +304,8 @@ async function main() {
     app = await createPocketServer({
       port,
       phoneAddresses: ips,
+      usbAddresses,
+      networkDiagnostic: detected.diagnostic,
       setup: { port: setupPort, certificate: setup.certificate },
       env: { ...process.env, TLS_CERT: certFile, TLS_KEY: keyFile, PUBLIC_ORIGIN: '' },
     });
@@ -303,7 +313,7 @@ async function main() {
       app.server.once('error', reject);
       app.server.listen(port, '0.0.0.0', resolve);
     });
-    state = { pid: process.pid, port, setupPort, addresses: ips, token };
+    state = { pid: process.pid, port, setupPort, addresses: ips, usbAddresses, token };
     await writeFile(stateFile, JSON.stringify(state), { mode: 0o600 });
     process.once('SIGINT', () => {
       void shutdown();
@@ -312,16 +322,21 @@ async function main() {
       void shutdown();
     });
     console.log(`\n已启动： https://localhost:${port}/receiver`);
+    if (usbAddresses.length)
+      console.log(
+        `检测到共享网络：${usbAddresses.join(', ')}。USB 直连在工作台的「连接手机」中选择，不使用共享网络。`,
+      );
     for (const ip of ips)
       console.log(`手机： https://${ip}:${port}    首次设置： http://${ip}:${setupPort}/setup`);
-    if (!ips.length) console.log('未检测到局域网地址，请连接 Wi-Fi 或有线网络后重新运行。');
+    if (!ips.length)
+      console.log(
+        '未检测到局域网地址。电脑音频处理和 USB 连接仍可使用；无线连接需接入网络后重新启动。',
+      );
     console.log(
-      '\n手机与电脑连接同一网络，在接收端扫码。首次证书安装与信任需在 iPhone 设置中完成。',
+      '\n工作台可直接使用电脑麦克风、变声和音效。需要手机时点击「连接手机」，选择 USB 或无线。USB 无需热点、局域网或手机证书；无线首次使用需在 iPhone 信任证书。',
     );
     console.log('如 Windows 提示防火墙访问，请允许 Node.js 访问所用的可信专用网络。');
-    console.log(
-      '保持此窗口打开。停止：Ctrl+C，或双击 Stop-PocketLink.cmd。切换网络后重新运行启动脚本。\n',
-    );
+    console.log('保持此窗口打开。停止：Ctrl+C。切换网络后重新运行启动脚本。\n');
     browser(port);
   } catch (error) {
     await Promise.allSettled([app?.close(), setup?.close()]);

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#111512" />
-    <meta name="description" content="输入配对码，将手机连接为电脑麦克风。" />
+    <meta name="description" content="连接电脑，遥控变声和音效，也可使用手机麦克风。" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>PocketLink</title>
@@ -61,29 +61,43 @@
             <h1 id="mic-title" tabindex="-1">麦克风</h1>
             <time id="session-time">00:00</time>
           </div>
-          <div class="mic-control">
-            <button id="mute-mic" class="mic-button" aria-label="静音麦克风" aria-pressed="false">
-              <span data-icon="mic"></span>
-            </button>
-            <p id="mic-caption" role="status">轻触静音</p>
+          <label class="toggle-setting"
+            ><span>使用手机麦克风</span
+            ><input type="checkbox" role="switch" id="phone-microphone" /><span
+              class="switch-track"
+              aria-hidden="true"
+            ></span
+          ></label>
+          <div id="microphone-controls" hidden>
+            <div class="mic-control">
+              <button id="mute-mic" class="mic-button" aria-label="静音麦克风" aria-pressed="false">
+                <span data-icon="mic"></span>
+              </button>
+              <p id="mic-caption" role="status">轻触静音</p>
+            </div>
+            <canvas id="waveform" aria-label="实时麦克风波形"></canvas>
+            <div class="gain-control">
+              <div class="label-row">
+                <label for="gain">音量</label><output id="gain-value" for="gain">100%</output>
+              </div>
+              <input id="gain" type="range" min="0" max="200" value="100" step="5" />
+            </div>
           </div>
-          <canvas id="waveform" aria-label="实时麦克风波形"></canvas>
           <div class="voice-control">
-            <label for="voice-effect">变声</label
+            <label for="voice-effect">电脑变声</label
             ><select id="voice-effect" aria-describedby="voice-status">
               <option value="original">原声</option>
               <option value="deep">低沉</option>
               <option value="cartoon">卡通</option>
               <option value="robot">机器人</option>
+              <option value="warm">磁性</option>
+              <option value="bright">清亮</option>
+              <option value="giant">巨人</option>
+              <option value="alien">外星人</option>
             </select>
           </div>
           <p id="voice-status" class="sr-only" role="status">当前为原声</p>
-          <div class="gain-control">
-            <div class="label-row">
-              <label for="gain">音量</label><output id="gain-value" for="gain">100%</output>
-            </div>
-            <input id="gain" type="range" min="0" max="200" value="100" step="5" />
-          </div>
+          <p id="phone-input-hint" class="setting-hint" role="status" hidden></p>
           <section id="soundboard" class="soundboard" aria-labelledby="sound-title" hidden>
             <div class="label-row">
               <h2 id="sound-title">音效</h2>
@@ -93,15 +107,15 @@
             <p id="sound-status" class="sound-status" role="status" aria-live="polite"></p>
           </section>
           <button class="record-button" id="record-button">
-            <span class="record-dot"></span><span id="record-label">录音</span
+            <span class="record-dot"></span><span id="record-label">手机录音</span
             ><time id="record-time" hidden>00:00</time>
           </button>
           <p id="mic-message" class="message" role="status" hidden></p>
-          <button id="resume-mic" class="secondary-button" hidden>恢复麦克风</button>
+          <button id="resume-mic" class="secondary-button" hidden>恢复音频</button>
         </section>
         <details id="recordings" class="recordings" hidden>
           <summary>录音 <span id="recording-count">0</span></summary>
-          <p class="recording-note">离开页面前，请下载保存。</p>
+          <p class="recording-note">仅录制手机人声，不含电脑变声和音效。离开页面前请下载保存。</p>
           <div id="recording-list"></div>
         </details>
       </main>
@@ -118,7 +132,9 @@
         <div class="mode-options">
           <label><input type="radio" name="mode" value="lan" checked /><span>局域网</span></label>
           <label><input type="radio" name="mode" value="server" /><span>服务器</span></label>
-          <label><input type="radio" name="mode" value="usb" /><span>有线</span></label>
+          <label hidden
+            ><input type="radio" name="mode" value="usb" /><span>USB（请使用 App）</span></label
+          >
         </div>
         <p id="mode-hint" class="setting-hint">手机和电脑连接同一网络。</p>
         <div id="server-field" hidden>

@@ -1,15 +1,20 @@
 import { icon, renderIcons } from './icons.js';
 import { AudioEngine, friendlyError } from './audio-engine.js';
 import { AudioLink, serviceURL } from './connection.js';
+import { PhoneController } from './phone-controller.js';
 import { setupSoundboard } from './soundboard.js';
 import { setupSoundSettings } from './sound-settings.js';
 
 renderIcons();
 const $ = (id) => document.getElementById(id);
 const engine = new AudioEngine();
-const soundboard = setupSoundboard(engine);
+const controller = new PhoneController();
+const soundboard = setupSoundboard(controller);
 setupSoundSettings(engine);
 const link = new AudioLink();
+link.addEventListener('control', (e) => controller.attach(e.detail.channel));
+controller.addEventListener('error', (e) => message('mic-message', e.detail.message, true));
+link.addEventListener('sounds-changed', () => void soundboard.load());
 const canvas = $('waveform');
 const recordings = [];
 let phase = 'pair';
@@ -17,7 +22,6 @@ let mode = 'lan';
 let previousLinkState = 'idle';
 let animation;
 let closing;
-let changingVoice = false;
 let scanJoining = false;
 const duration = (ms) => {
   const seconds = Math.floor(Math.max(0, ms) / 1000);
@@ -80,13 +84,19 @@ function drawWave() {
 
 function updateMic() {
   const on = engine.state === 'on';
-  $('mute-mic').disabled = !on;
+  const capturing = on && !!engine.track;
+  $('phone-microphone').checked = !!engine.track || engine.microphoneStarting;
+  $('phone-microphone').disabled = !on || engine.microphoneStarting;
+  $('microphone-controls').hidden = !capturing;
+  $('mic-title').textContent = capturing ? '手机麦克风' : '音效面板';
+  $('mute-mic').disabled = !capturing;
   $('mute-mic').innerHTML = icon(engine.muted ? 'mute' : 'mic');
   $('mute-mic').setAttribute('aria-pressed', String(engine.muted));
   $('mute-mic').setAttribute('aria-label', engine.muted ? '取消静音' : '静音麦克风');
   $('mic-caption').textContent = engine.muted ? '已静音 · 轻触恢复' : '轻触静音';
-  $('record-button').disabled = !on || engine.finishing;
-  $('voice-effect').disabled = !on || changingVoice;
+  $('record-button').disabled = !on || engine.finishing || (!capturing && !engine.recording);
+  updateVoice();
+  updateInputHint();
   if (!on && phase === 'control') {
     message('pair-status', '麦克风已关闭，请重新连接。', true);
     void endSession();
@@ -98,6 +108,7 @@ function endSession() {
   if (closing) return closing;
   phase = 'closing';
   cancelAnimationFrame(animation);
+  controller.detach();
   link.close();
   updateView();
   closing = engine.stop().finally(() => {
@@ -134,16 +145,20 @@ async function connectPhone({ automatic = false } = {}) {
   phase = 'joining';
   scanJoining = automatic;
   updateView();
-  message('pair-status', '请允许使用麦克风');
+  message('pair-status', '正在连接电脑…');
   try {
     let server;
+    if (mode === 'usb')
+      throw new Error(
+        'USB 直连请使用新版 iOS App，在电脑工作台选择「连接手机 → USB 有线」。手机网页不支持此模式。',
+      );
     if (mode === 'server') {
       if (!$('server-url').value.trim()) throw new Error('请在设置中填写服务器地址。');
       server = serviceURL($('server-url').value.trim());
     }
-    await engine.start({ automatic });
+    await engine.start({ automatic, microphone: false });
     if (phase !== 'joining') return;
-    await link.open({ role: 'sender', code, server, mode, stream: engine.stream });
+    await link.open({ role: 'sender', code, server, mode, stream: engine.stream, control: true });
   } catch (error) {
     message('pair-status', friendlyError(error), true);
     await endSession();
@@ -200,6 +215,17 @@ link.addEventListener('error', (event) => {
 });
 
 engine.addEventListener('state', updateMic);
+engine.addEventListener('microphone', updateMic);
+$('phone-microphone').addEventListener('change', async () => {
+  message('mic-message');
+  try {
+    if ($('phone-microphone').checked) await engine.enableMicrophone();
+    else engine.disableMicrophone();
+  } catch (error) {
+    message('mic-message', friendlyError(error), true);
+  }
+  updateMic();
+});
 engine.addEventListener('warning', (event) => {
   const target = $('settings-dialog').open
     ? 'settings-message'
@@ -226,29 +252,41 @@ $('gain').addEventListener('input', () => {
 });
 
 function updateVoice() {
-  $('voice-effect').value = engine.voice;
-  $('voice-status').textContent = `当前为${$('voice-effect').selectedOptions[0].textContent}`;
+  if (controller.presets.length) {
+    $('voice-effect').replaceChildren(...controller.presets.map((p) => new Option(p.name, p.id)));
+    $('voice-effect').value = controller.voice;
+  }
+  $('voice-effect').disabled = controller.state !== 'on' || controller.voicePending;
+  $('voice-status').textContent = controller.voicePending
+    ? '正在切换电脑变声'
+    : `当前为${$('voice-effect').selectedOptions[0]?.textContent || '原声'}`;
 }
-engine.addEventListener('voice', updateVoice);
-$('voice-effect').addEventListener('change', async () => {
-  changingVoice = true;
-  $('voice-effect').disabled = true;
-  $('voice-status').textContent = '正在切换变声';
+controller.addEventListener('voice', updateVoice);
+controller.addEventListener('state', updateVoice);
+$('voice-effect').addEventListener('change', () => {
   try {
-    await engine.setVoice($('voice-effect').value);
-  } finally {
-    changingVoice = false;
+    controller.setVoice($('voice-effect').value);
+  } catch (error) {
     updateVoice();
-    $('voice-effect').disabled = engine.state !== 'on';
+    message('mic-message', error.message, true);
   }
 });
+function updateInputHint() {
+  const input = controller.input;
+  $('phone-input-hint').hidden = !engine.track;
+  $('phone-input-hint').textContent =
+    input?.phone && input.enabled
+      ? '电脑正在使用手机输入'
+      : '手机采集中；请在电脑选择「手机」并开启输入';
+}
+controller.addEventListener('input', updateInputHint);
 
 $('open-settings').addEventListener('click', () => $('settings-dialog').showModal());
 $('close-settings').addEventListener('click', () => $('settings-dialog').close());
 const hints = {
   lan: '手机和电脑连接同一网络。',
   server: '使用已配置音频中继的 PocketLink 服务。',
-  usb: '先通过 USB 建立手机与电脑的网络共享。',
+  usb: 'USB 直连请使用新版 iOS App；无需热点或局域网，手机网页不支持此模式。',
 };
 document.querySelectorAll('[name="mode"]').forEach((input) => {
   input.addEventListener('change', () => {
@@ -271,8 +309,9 @@ engine.addEventListener('recording', () => {
     ? '保存中…'
     : engine.recording
       ? '停止录音'
-      : '录音';
-  $('record-button').disabled = engine.state !== 'on' || engine.finishing;
+      : '手机录音';
+  $('record-button').disabled =
+    engine.state !== 'on' || engine.finishing || (!engine.track && !engine.recording);
   $('record-time').hidden = !engine.recording;
   $('record-time').textContent = '00:00';
 });
@@ -315,26 +354,36 @@ window.addEventListener('beforeunload', (event) => {
 });
 window.addEventListener('pagehide', () => {
   phase = 'closing';
+  controller.detach();
   link.close();
   cancelAnimationFrame(animation);
   void engine.stop();
   for (const record of recordings) URL.revokeObjectURL(record.url);
 });
 updateView();
-// A QR carries only a pairing code; it always connects to this page's service.
+// A QR carries a pairing code and optional mode; it always uses this page's service.
 // Consume it once so refresh/back navigation does not restart capture.
 function consumeScannedCode() {
   const scanParameters = new URLSearchParams(location.hash.slice(1));
   if (!scanParameters.has('pair')) return;
   const code = scanParameters.get('pair');
+  const scannedMode = scanParameters.get('mode');
+  const validMode = !scannedMode || ['lan', 'usb', 'server'].includes(scannedMode);
   scanParameters.delete('pair');
+  scanParameters.delete('mode');
   history.replaceState(
     null,
     '',
     location.pathname + location.search + (scanParameters.size ? '#' + scanParameters : ''),
   );
   if (phase !== 'pair') return;
-  if (/^\d{8}$/.test(code || '')) {
+  if (/^\d{8}$/.test(code || '') && validMode) {
+    if (scannedMode) {
+      mode = scannedMode;
+      document.querySelector(`[name="mode"][value="${mode}"]`).checked = true;
+      $('server-field').hidden = mode !== 'server';
+      $('mode-hint').textContent = hints[mode];
+    }
     $('pair-code').value = code.slice(0, 4) + ' ' + code.slice(4);
     void connectPhone({ automatic: true });
   } else {

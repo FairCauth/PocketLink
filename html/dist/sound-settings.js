@@ -29,7 +29,7 @@ export function setupSoundSettings(engine) {
     const status = engine.processingStatus();
     $('noise-status').textContent = !status.active
       ? engine.options.noiseSuppression
-        ? '连接后启用 · 本地处理'
+        ? '启用手机麦克风后生效 · 本地处理'
         : '已关闭'
       : status.noise === 'ai'
         ? 'RNNoise · 本地处理'
@@ -46,7 +46,7 @@ export function setupSoundSettings(engine) {
               : '已关闭';
     $('echo-status').textContent = !status.active
       ? engine.options.echoCancellation
-        ? '连接后启用'
+        ? '启用手机麦克风后生效'
         : '已关闭'
       : status.echo === true || typeof status.echo === 'string'
         ? engine.options.echoCancellation
@@ -59,7 +59,7 @@ export function setupSoundSettings(engine) {
           : '浏览器未报告生效状态';
     inputs.forEach((input) => (input.disabled = busy || capturing));
     $('noise-preview').disabled =
-      engine.state !== 'on' || busy || capturing || status.noise === 'loading';
+      engine.state !== 'on' || !engine.track || busy || capturing || status.noise === 'loading';
     $('noise-preview').textContent = capturing ? '录制中…' : urls.length ? '重新录制' : '听效果';
     $('preview-controls').hidden = !urls.length;
   }
@@ -224,7 +224,7 @@ export function setupSoundSettings(engine) {
   }
   function meter() {
     stopMeter();
-    if (!dialog.open || !engine.micInput || engine.state !== 'on') return;
+    if (!dialog.open || !engine.track || !engine.micInput || engine.state !== 'on') return;
     meteredNode = engine.micInput;
     analyser = engine.context.createAnalyser();
     analyser.fftSize = 512;
@@ -245,6 +245,11 @@ export function setupSoundSettings(engine) {
     $('preview-status').textContent = '连接后可录制 4 秒，对比降噪效果。';
   });
   engine.addEventListener('processing', update);
+  engine.addEventListener('microphone', () => {
+    if (!engine.track) clearPreview();
+    update();
+    meter();
+  });
   engine.addEventListener('state', () => {
     if (engine.state !== 'on') clearPreview();
     update();

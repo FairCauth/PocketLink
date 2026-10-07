@@ -15,6 +15,8 @@ export class AudioEngine extends EventTarget {
     this.previewing = false;
     this.recording = false;
     this.generation = 0;
+    this.microphoneGeneration = 0;
+    this.microphoneStarting = false;
     this.soundGeneration = 0;
     this.sound = null;
     this.soundBuffers = new Map();
@@ -22,12 +24,9 @@ export class AudioEngine extends EventTarget {
   emit(type, detail = {}) {
     this.dispatchEvent(new CustomEvent(type, { detail }));
   }
-  async start({ automatic = false } = {}) {
+  async start({ automatic = false, microphone = true } = {}) {
     if (this.state !== 'off') return;
-    if (!window.isSecureContext)
-      throw new Error('iPhone 录音需要可信 HTTPS。请按连接指南配置证书后打开网页。');
-    if (!navigator.mediaDevices?.getUserMedia)
-      throw new Error('当前浏览器无法访问麦克风，请使用最新版 Safari、Chrome 或 Edge。');
+    if (!window.isSecureContext) throw new Error('请使用可信 HTTPS 地址打开网页。');
     const generation = ++this.generation;
     this.state = 'starting';
     this.emit('state');
@@ -39,72 +38,107 @@ export class AudioEngine extends EventTarget {
         if (error.name !== 'NotSupportedError') throw error;
         this.context = new Context();
       }
-      // A scanned link has no page gesture. Obtain permission before resuming audio.
-      if (!automatic) await this.context.resume();
-      const raw = await navigator.mediaDevices.getUserMedia({
-        audio: { ...this.options, channelCount: 1, sampleRate: 48000, autoGainControl: false },
-        video: false,
-      });
-      if (generation !== this.generation) {
-        raw.getTracks().forEach((t) => t.stop());
-        return;
-      }
-      this.raw = raw;
-      this.track = raw.getAudioTracks()[0];
-      if (automatic) {
-        let timer;
-        try {
-          await Promise.race([
-            this.context.resume(),
-            new Promise((_, reject) => {
-              timer = setTimeout(
-                () => reject(new Error('已识别配对码，请点击「连接」启用麦克风。')),
-                2000,
-              );
-            }),
-          ]);
-        } finally {
-          clearTimeout(timer);
-        }
-        if (generation !== this.generation) return;
-      }
-      this.source = this.context.createMediaStreamSource(raw);
-      this.gain = this.context.createGain();
-      this.analyser = this.context.createAnalyser();
+      const context = this.context;
+      // Keep one outbound track for effects and optional microphone capture.
+      this.gain = context.createGain();
+      this.analyser = context.createAnalyser();
       this.analyser.fftSize = 2048;
       this.analyser.smoothingTimeConstant = 0.8;
-      this.destination = this.context.createMediaStreamDestination();
-      // Stable microphone bus: capture → denoise → voice → gain → mix.
-      // Soundboard audio joins the mix afterwards, so denoising never removes effects.
-      this.micInput = this.context.createGain();
-      this.source.connect(this.micInput);
+      this.destination = context.createMediaStreamDestination();
+      this.micInput = context.createGain();
       this.micInput.connect(this.gain);
       this.gain.connect(this.analyser);
       this.analyser.connect(this.destination);
       this.stream = this.destination.stream;
-      this.stream.getAudioTracks()[0].contentHint = 'speech';
-      await this.configureProcessing();
+      this.stream.getAudioTracks()[0].contentHint = 'music';
+      // QR pairing has no gesture. The first sound button resumes the context.
+      if (!automatic) await context.resume();
       if (generation !== this.generation) return;
-      if (this.voice !== 'original') await this.setVoice(this.voice);
+      if (microphone) await this.enableMicrophone({ automatic });
       if (generation !== this.generation) return;
       this.setGain(this.gainValue);
       this.state = 'on';
-      this.track.onended = () => {
-        this.stop();
-        this.emit('warning', { message: '麦克风已被系统关闭，请重新启用。' });
-      };
-      this.track.onmute = () =>
-        this.emit('warning', { message: '音频输入被系统暂停，请保持页面在前台。' });
-      this.context.onstatechange = () => {
-        if (this.state === 'on' && this.context.state !== 'running')
-          this.emit('warning', { message: '音频已暂停，回到页面并点击启用以恢复。' });
+      context.onstatechange = () => {
+        if (this.state === 'on' && context.state !== 'running')
+          this.emit('warning', { message: '音频已暂停，请点击恢复音频。' });
       };
       this.emit('state');
       this.acquireWakeLock();
     } catch (error) {
+      if (generation !== this.generation) return;
       await this.stop();
       throw error;
     }
+  }
+  async enableMicrophone({ automatic = false } = {}) {
+    if (this.track || this.microphoneStarting || !this.context) return;
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前浏览器无法访问麦克风。');
+    const request = ++this.microphoneGeneration;
+    const context = this.context;
+    const current = () => request === this.microphoneGeneration && context === this.context;
+    this.microphoneStarting = true;
+    this.emit('microphone');
+    try {
+      if (!automatic) await context.resume();
+      if (!current()) return;
+      const raw = await navigator.mediaDevices.getUserMedia({
+        audio: { ...this.options, channelCount: 1, sampleRate: 48000, autoGainControl: false },
+        video: false,
+      });
+      if (!current()) {
+        raw.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      this.raw = raw;
+      this.track = raw.getAudioTracks()[0];
+      this.track.onended = () => {
+        this.disableMicrophone();
+        this.emit('warning', { message: '手机麦克风已关闭，仍可播放音效。' });
+      };
+      this.track.onmute = () =>
+        this.emit('warning', { message: '麦克风被系统暂停，请保持页面在前台。' });
+      if (automatic) await context.resume();
+      if (!current()) return;
+      this.source = context.createMediaStreamSource(raw);
+      this.source.connect(this.micInput);
+      await this.configureProcessing();
+      if (!current()) return;
+      if (this.voice !== 'original') await this.setVoice(this.voice);
+    } catch (error) {
+      if (!current()) return;
+      this.disableMicrophone();
+      throw error;
+    } finally {
+      if (current()) {
+        this.microphoneStarting = false;
+        this.emit('microphone');
+      }
+    }
+  }
+  disableMicrophone() {
+    ++this.microphoneGeneration;
+    ++this.noiseGeneration;
+    ++this.voiceGeneration;
+    this.microphoneStarting = false;
+    this.noiseRequest?.abort();
+    this.noiseRequest = null;
+    this.bypassNoise();
+    this.noiseMode = 'off';
+    if (this.track) {
+      this.track.onended = null;
+      this.track.onmute = null;
+    }
+    this.raw?.getTracks().forEach((track) => track.stop());
+    this.source?.disconnect();
+    this.raw = this.track = this.source = null;
+    const voice = this.voice;
+    this.resetVoice();
+    this.voice = voice;
+    this.emit('voice');
+    this.muted = false;
+    this.setGain(this.gainValue);
+    this.emit('microphone');
+    this.emit('processing');
   }
   async acquireWakeLock() {
     try {
@@ -152,7 +186,7 @@ export class AudioEngine extends EventTarget {
     this.emit('sound');
   }
   async playSound(sound) {
-    if (this.state !== 'on') throw new Error('请先连接麦克风。');
+    if (this.state !== 'on') throw new Error('请先连接电脑。');
     this.stopSound();
     const request = this.soundGeneration;
     const context = this.context;
@@ -431,6 +465,7 @@ export class AudioEngine extends EventTarget {
   }
   async stop() {
     ++this.generation;
+    this.disableMicrophone();
     ++this.voiceGeneration;
     ++this.noiseGeneration;
     this.noiseRequest?.abort();
