@@ -12,7 +12,7 @@ app="build/UnsignedDerivedData/Build/Products/Release-iphoneos/PocketLink.app"
 test -f "$app/PocketLink"
 platform=$(/usr/libexec/PlistBuddy -c 'Print :DTPlatformName' "$app/Info.plist")
 test "$platform" = "iphoneos"
-lipo -verify_arch arm64 "$app/PocketLink"
+lipo "$app/PocketLink" -verify_arch arm64
 version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")
 build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Info.plist")
 
