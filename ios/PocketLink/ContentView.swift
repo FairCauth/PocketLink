@@ -59,9 +59,9 @@ struct ContentView: View {
                         }
                         Section {
                             Text("同一 Wi-Fi 使用默认方式。跨网络连接需在电脑服务配置 TURN。")
-                            Text("USB 有线：插线并信任电脑，运行 Start-PocketLink-USB.cmd，输入电脑的 USB 配对码。无需热点、Wi-Fi、局域网或手机根证书。Windows 需安装 Apple Devices。")
+                            Text("USB 有线：插线并信任电脑，运行 Start-PocketLink.cmd，输入电脑的 USB 配对码。无需热点、Wi-Fi、局域网或手机根证书。Windows 需安装 Apple Devices。")
                             Text("USB 模式也需要开启麦克风或后台保持才能申请后台音频运行；电话和系统挂起仍可能中断。")
-                            Text("无线模式首次连接需要信任电脑根证书。")
+                            Text("无线首次连接用 App 扫描电脑配对二维码，无需安装证书。以后可输入配对码；电脑地址或证书变化后重新扫码。")
                         }.font(.footnote)
                     }
                     .navigationTitle("设置")
@@ -82,7 +82,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("连接电脑").font(.largeTitle.bold())
-                Text(model.connectionMode == "usb" ? "插入数据线，输入电脑配对码。" : "输入配对码，或扫一扫。")
+                Text(model.connectionMode == "usb" ? "插入数据线，输入电脑配对码。" : "首次扫一扫，无需安装证书。")
                     .font(.subheadline).foregroundStyle(.secondary)
             }.padding(.top, 36)
             Picker("连接方式", selection: $model.connectionMode) {
@@ -91,7 +91,7 @@ struct ContentView: View {
                 Text("中继").tag("server")
             }.pickerStyle(.segmented).disabled(model.busy)
             if model.connectionMode == "usb" {
-                Text("电脑运行 Start-PocketLink-USB.cmd 并创建配对码。无需热点、Wi-Fi 或局域网。")
+                Text("电脑运行 Start-PocketLink.cmd，选择 USB 有线并创建配对码。无需热点、Wi-Fi 或局域网。")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             TextField("0000 0000", text: $model.code)
@@ -127,37 +127,50 @@ struct ContentView: View {
         }
     }
 
+    private var inputIsOn: Bool {
+        model.selectedInput == "phone" || model.inputs.isEmpty ? model.microphone : model.inputEnabled
+    }
+
+    private var inputBusy: Bool { model.requestingMicrophone || model.changingInput }
+
     private var controls: some View {
         VStack(alignment: .leading, spacing: 24) {
+            if !model.inputs.isEmpty {
+                Picker("输入麦克风", selection: Binding(get: { model.selectedInput }, set: { model.selectInput($0) })) {
+                    ForEach(model.inputs) { input in Text(input.name).tag(input.id) }
+                }.disabled(inputBusy || !model.controlReady)
+            }
             Button(action: model.toggleMicrophone) {
                 VStack(spacing: 16) {
-                    if model.requestingMicrophone {
+                    if inputBusy {
                         ProgressView().controlSize(.large)
                     } else {
-                        Image(systemName: model.microphone ? "mic.fill" : "mic.slash")
+                        Image(systemName: inputIsOn ? "mic.fill" : "mic.slash")
                             .font(.system(size: 42, weight: .light))
                     }
-                    Text(model.requestingMicrophone ? "正在切换…" : (model.microphone ? "麦克风已开启" : "开启麦克风")).font(.title3.bold())
-                    Text(model.microphone ? "点按关闭 · 可锁屏使用" : (model.keepAlive ? "后台待命 · 人声不发送" : "只播音效无需开启 · 锁屏可能暂停连接"))
+                    Text(inputBusy ? "正在切换…" : (inputIsOn ? "麦克风已开启" : "开启麦克风")).font(.title3.bold())
+                    Text(model.selectedInput == "phone" || model.inputs.isEmpty
+                         ? (model.microphone ? "点按关闭 · 可锁屏使用" : "点按开启手机麦克风")
+                         : (model.selectedInput == "none" ? "仅播放音效" : "控制电脑选中的麦克风"))
                         .font(.footnote).opacity(0.65)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 32)
-                .foregroundStyle(model.microphone ? Color.black : accent)
-                .background(model.microphone ? accent : Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 24))
+                .foregroundStyle(inputIsOn ? Color.black : accent)
+                .background(inputIsOn ? accent : Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 24))
             }
             .buttonStyle(.plain)
-            .disabled(model.requestingMicrophone)
+            .disabled(inputBusy || (!model.inputs.isEmpty && model.selectedInput == "none"))
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("保持后台开启", isOn: Binding(get: { model.keepAlive }, set: { _ in model.toggleKeepAlive() }))
-                    .disabled(model.requestingMicrophone)
-                Text("保持麦克风采集，系统会显示橙色指示。不开启上方麦克风时，人声不发送、不保存；会增加耗电。")
+                    .disabled(inputBusy)
+                Text("使用手机麦克风维持后台，显示橙色指示；未选中手机或未开启手机人声时不发送、不保存录音。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if !model.voices.isEmpty {
                 Picker("变声", selection: Binding(get: { model.voice }, set: { model.selectVoice($0) })) {
                     ForEach(model.voices) { preset in Text(preset.name).tag(preset.id) }
                 }.disabled(model.changingVoice || !model.controlReady)
-                Text("同时处理手机与电脑麦克风，音效保持原音。")
+                Text("处理当前选中的麦克风，音效保持原音。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             HStack {

@@ -20,11 +20,18 @@ final class AppModel: ObservableObject {
     @Published private(set) var controlReady = false
     @Published private(set) var sounds: [SoundPreset] = []
     @Published private(set) var playingID: String?
+    @Published private(set) var inputs: [SoundPreset] = []
+    @Published private(set) var selectedInput = "none"
+    @Published private(set) var inputEnabled = false
+    @Published private(set) var changingInput = false
     @Published var message = ""
     private let rtc = RTCClient()
     private let usb = USBClient()
     private var usingUSB = false
-    private let session: URLSession
+    private var session: URLSession?
+    private var scannedEndpoint: PairingEndpoint?
+    private var inputRequest: String?
+    private var inputTimeout: DispatchWorkItem?
     private var configTask: URLSessionDataTask?
     private var socket: URLSessionWebSocketTask?
     private var timeout: DispatchWorkItem?
@@ -42,10 +49,6 @@ final class AppModel: ObservableObject {
     private var routeToken: NSObjectProtocol?
 
     init() {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 12
-        config.waitsForConnectivity = false
-        session = URLSession(configuration: config)
         usb.onConnected = { [weak self] in
             guard let self = self, self.usingUSB else { return }
             self.timeout?.cancel()
@@ -91,12 +94,17 @@ final class AppModel: ObservableObject {
     deinit {
         if let interruptionToken = interruptionToken { NotificationCenter.default.removeObserver(interruptionToken) }
         if let routeToken = routeToken { NotificationCenter.default.removeObserver(routeToken) }
-        session.invalidateAndCancel()
+        session?.invalidateAndCancel()
     }
 
     func connect() {
         if connectionMode == "usb" { connectUSB(); return }
-        do { connect(try PairingEndpoint(server: server, code: code, mode: connectionMode)) }
+        do {
+            let manual = try PairingEndpoint(server: server, code: code, mode: connectionMode)
+            let remembered = UserDefaults.standard.dictionary(forKey: "pairedCertificatePins") as? [String: String] ?? [:]
+            let pin = scannedEndpoint?.base == manual.base ? scannedEndpoint?.fingerprint : remembered[manual.base.absoluteString]
+            connect(try PairingEndpoint(server: server, code: code, mode: connectionMode, fingerprint: pin))
+        }
         catch { message = error.localizedDescription }
     }
 
@@ -106,6 +114,7 @@ final class AppModel: ObservableObject {
             server = endpoint.base.absoluteString
             code = endpoint.code
             connectionMode = endpoint.mode
+            scannedEndpoint = endpoint
             if endpoint.mode == "usb" { connectUSB(); return }
             connect(endpoint)
         } catch { message = error.localizedDescription }
@@ -143,6 +152,11 @@ final class AppModel: ObservableObject {
     private func connect(_ endpoint: PairingEndpoint) {
         disconnect()
         self.endpoint = endpoint
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 12
+        config.waitsForConnectivity = false
+        let session = URLSession(configuration: config, delegate: PairingTrust(endpoint: endpoint), delegateQueue: nil)
+        self.session = session
         UserDefaults.standard.set(endpoint.base.absoluteString, forKey: "server")
         busy = true
         message = "正在连接…"
@@ -167,7 +181,7 @@ final class AppModel: ObservableObject {
                         guard !urls.isEmpty else { return nil }
                         return RTCIceServer(urlStrings: urls, username: item["username"] as? String, credential: item["credential"] as? String)
                     }
-                    let socket = self.session.webSocketTask(with: endpoint.signaling)
+                    let socket = session.webSocketTask(with: endpoint.signaling)
                     socket.maximumMessageSize = 65536
                     self.socket = socket
                     socket.resume()
@@ -207,6 +221,11 @@ final class AppModel: ObservableObject {
     private func handle(_ value: [String: Any]) throws {
         switch value["type"] as? String {
         case "joined":
+            if let endpoint = endpoint, let pin = endpoint.fingerprint {
+                var pins = UserDefaults.standard.dictionary(forKey: "pairedCertificatePins") as? [String: String] ?? [:]
+                pins[endpoint.base.absoluteString] = pin
+                UserDefaults.standard.set(pins, forKey: "pairedCertificatePins")
+            }
             message = "正在建立音频连接…"
             let relay = endpoint?.mode == "server"
             try rtc.start(iceServers: relay ? iceServers : [], relay: relay)
@@ -241,6 +260,11 @@ final class AppModel: ObservableObject {
     }
 
     func toggleMicrophone() {
+        guard !changingInput, !requestingMicrophone else { return }
+        if !inputs.isEmpty && selectedInput != "phone" {
+            selectInput(selectedInput, enabled: !inputEnabled)
+            return
+        }
         configureAudio(microphone: !microphone, keepAlive: keepAlive)
     }
 
@@ -283,6 +307,9 @@ final class AppModel: ObservableObject {
                 self.microphone = enabled
                 self.keepAlive = keepAlive
                 self.message = ""
+                if self.selectedInput == "phone" && self.inputEnabled != enabled {
+                    self.selectInput("phone", enabled: enabled)
+                }
             case .failure(let error):
                 self.microphone = false
                 self.keepAlive = false
@@ -308,6 +335,27 @@ final class AppModel: ObservableObject {
     func stopSound() { _ = sendControl(["type": "stop-sound"]) }
     func refreshSounds() { _ = sendControl(["type": "refresh-catalog"]) }
 
+    func selectInput(_ id: String, enabled: Bool? = nil) {
+        guard !changingInput, !requestingMicrophone, inputs.contains(where: { $0.id == id }) else { return }
+        let request = UUID().uuidString
+        var command: [String: Any] = ["type": "set-input", "id": id, "requestId": request]
+        if let enabled = enabled { command["enabled"] = enabled }
+        guard sendControl(command) else { message = "麦克风控制尚未连接。"; return }
+        inputRequest = request
+        changingInput = true
+        inputTimeout?.cancel()
+        let token = generation
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, self.generation == token, self.inputRequest == request else { return }
+            self.inputRequest = nil
+            self.changingInput = false
+            self.message = "麦克风切换未收到确认，请检查电脑接收页。"
+            self.refreshSounds()
+        }
+        inputTimeout = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: work)
+    }
+
     func selectVoice(_ id: String) {
         guard !changingVoice, voices.contains(where: { $0.id == id }) else { return }
         guard sendControl(["type": "set-voice", "id": id]) else {
@@ -326,6 +374,47 @@ final class AppModel: ObservableObject {
     }
     private func handleControl(_ message: [String: Any]) {
         switch message["type"] as? String {
+        case "input-state":
+            guard let list = message["devices"], let data = try? JSONSerialization.data(withJSONObject: list),
+                  let values = try? JSONDecoder().decode([SoundPreset].self, from: data),
+                  let selected = message["selected"] as? String,
+                  let enabled = message["enabled"] as? Bool else { return }
+            var ids = Set<String>()
+            let devices = Array(values.filter { !$0.id.isEmpty && ids.insert($0.id).inserted }.prefix(100))
+            guard devices.contains(where: { $0.id == selected }) else { return }
+            inputs = devices
+            selectedInput = selected
+            inputEnabled = enabled
+            // Selecting a computer microphone must also stop phone transmission.
+            // Keep-alive, when explicitly enabled, may retain the audio session.
+            let stoppedAtDesktop = selected == "phone" && !enabled &&
+                message["pending"] as? Bool == false && inputRequest == nil && !requestingMicrophone
+            if (selected != "phone" || stoppedAtDesktop) && (microphone || requestingMicrophone) {
+                audioOperation += 1
+                requestingMicrophone = false
+                microphone = false
+                let token = generation
+                let operation = audioOperation
+                setMicrophone(false, keepAlive: keepAlive) { [weak self] result in
+                    guard let self = self, self.generation == token, self.audioOperation == operation else { return }
+                    if case .failure(let error) = result {
+                        self.keepAlive = false
+                        self.message = error.localizedDescription
+                    }
+                }
+            }
+        case "input-result":
+            guard message["requestId"] as? String == inputRequest, inputRequest != nil else { return }
+            inputTimeout?.cancel()
+            inputRequest = nil
+            changingInput = false
+            if let error = message["error"] as? String {
+                if selectedInput == "phone" && microphone && !inputEnabled {
+                    configureAudio(microphone: false, keepAlive: keepAlive)
+                }
+                self.message = error
+            }
+            else { self.message = "" }
         case "voice-state":
             guard let list = message["presets"], let data = try? JSONSerialization.data(withJSONObject: list),
                   let values = try? JSONDecoder().decode([SoundPreset].self, from: data),
@@ -391,12 +480,20 @@ final class AppModel: ObservableObject {
         generation += 1
         audioOperation += 1
         voiceTimeout?.cancel()
+        inputTimeout?.cancel()
+        inputRequest = nil
+        changingInput = false
+        inputs = []
+        selectedInput = "none"
+        inputEnabled = false
         timeout?.cancel()
         healthTimeout?.cancel()
         healthTimeout = nil
         rtcConnected = false
         configTask?.cancel()
         configTask = nil
+        session?.invalidateAndCancel()
+        session = nil
         socket?.cancel(with: .normalClosure, reason: nil)
         socket = nil
         usb.close()
@@ -433,8 +530,8 @@ final class AppModel: ObservableObject {
             }
         }
         let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain && [-1200, -1201, -1202, -1203, -1204].contains(nsError.code) {
-            message = "证书未受信任。请从电脑的“首次使用 iPhone？”页面安装根证书，并在 Settings → General → About → Certificate Trust Settings 开启信任。"
+        if nsError.domain == NSURLErrorDomain && [-999, -1200, -1201, -1202, -1203, -1204].contains(nsError.code) {
+            message = "无法验证这台电脑。请在新版电脑接收页刷新配对二维码，用 App 重新扫码；无需安装手机证书。"
         } else { message = error.localizedDescription }
     }
 }

@@ -42,8 +42,15 @@ try {
   await receiver
     .locator('#input-device option[value=phone]')
     .waitFor({ state: 'attached', timeout: 15000 });
-  await receiver.locator('#input-device').selectOption('phone');
-  await receiver.locator('#input-toggle').click();
+  assert.equal(
+    await receiver.locator('#input-device option[value=phone]').textContent(),
+    '手机（USB 有线）',
+  );
+  fake.control({ type: 'set-input', id: 'phone', enabled: true, requestId: 'usb-phone' });
+  await receiver.waitForFunction(
+    () => document.getElementById('input-toggle').getAttribute('aria-pressed') === 'true',
+  );
+  assert.equal(await receiver.locator('#input-device').inputValue(), 'phone');
   assert.equal(await receiver.locator('#phone-entry').isVisible(), false);
   assert.equal(fake.connections[0].DeviceID, 9);
   audioTimer = setInterval(() => fake.audio(), 10);

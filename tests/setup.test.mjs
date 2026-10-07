@@ -10,6 +10,8 @@ import { X509Certificate } from 'node:crypto';
 import { certificateNeedsRenewal } from '../scripts/certificates.mjs';
 import { createSetupServer } from '../server/setup.mjs';
 import { createPocketServer } from '../server/index.mjs';
+import https from 'node:https';
+import QRCode from 'qrcode';
 
 const mkcert = fileURLToPath(new URL('../mkcert.exe', import.meta.url));
 let available = process.platform === 'win32';
@@ -142,5 +144,40 @@ test(
       assert.match(await response.text(), /<svg/);
     }
     assert.equal((await fetch(appBase + '/api/qr.svg?index=999')).status, 404);
+    // Use a fresh temporary CA, never installed into the system trust store.
+    const tlsApp = await createPocketServer({
+      port: 0,
+      env: { TLS_CERT: certFile, TLS_KEY: keyFile },
+      phoneAddresses: ['127.0.0.1'],
+    });
+    tlsApp.server.listen(0, '127.0.0.1');
+    await once(tlsApp.server, 'listening');
+    t.after(() => tlsApp.close());
+    const tlsBase = `https://127.0.0.1:${tlsApp.server.address().port}`;
+    const get = (url) =>
+      new Promise((resolve, reject) => {
+        https
+          .get(url, { ca: root }, (res) => {
+            let body = '';
+            res.on('data', (chunk) => (body += chunk));
+            res.on('end', () => resolve(body));
+          })
+          .on('error', reject);
+      });
+    const fingerprint = new X509Certificate(await readFile(certFile)).fingerprint256
+      .replaceAll(':', '')
+      .toLowerCase();
+    assert.equal(
+      await get(tlsBase + '/api/qr.svg?code=01234567&fp=attacker'),
+      await QRCode.toString(`${tlsBase}/#pair=01234567&fp=${fingerprint}`, {
+        type: 'svg',
+        margin: 4,
+        errorCorrectionLevel: 'M',
+      }),
+    );
+    assert.equal(
+      await get(tlsBase + '/api/qr.svg'),
+      await QRCode.toString(tlsBase, { type: 'svg', margin: 4, errorCorrectionLevel: 'M' }),
+    );
   },
 );

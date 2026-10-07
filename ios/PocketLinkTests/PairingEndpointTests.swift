@@ -1,7 +1,19 @@
 import XCTest
+import Security
+import CryptoKit
 @testable import PocketLink
 
 final class PairingEndpointTests: XCTestCase {
+    func testCertificatePinComesFromQRCode() throws {
+        let pin = String(repeating: "AB", count: 32)
+        let pair = try PairingEndpoint(qr: "https://192.168.1.20:8787/#pair=12345678&fp=\(pin)")
+        XCTAssertEqual(pair.fingerprint, pin.lowercased())
+        XCTAssertEqual(pair.signaling.absoluteString, "wss://192.168.1.20:8787/signal")
+        XCTAssertNil(try PairingEndpoint(server: "https://host", code: "12345678").fingerprint)
+        for field in ["fp=", "fp", "fp=abc", "fp=\(pin)&fp=\(pin)", "fp=\(String(repeating: "z", count: 64))"] {
+            XCTAssertThrowsError(try PairingEndpoint(qr: "https://host/#pair=12345678&\(field)"))
+        }
+    }
     func testUSBQRCodeRetainsMode() throws {
         let pair = try PairingEndpoint(qr: "https://172.20.10.2:8787/#pair=12345678&mode=usb")
         XCTAssertEqual(pair.mode, "usb")
@@ -159,4 +171,40 @@ private final class TestAudioDriver: AudioSessionDriver {
     func activate() throws { record("activate"); try onActivate?() }
     func setAudioEnabled(_ enabled: Bool) { record("audio:\(enabled)") }
     func deactivate() throws { record("deactivate") }
+}
+
+// Public test certificate only. Both generated private keys were discarded.
+final class PairingTrustTests: XCTestCase {
+    private let certificateDER = "MIIDIDCCAgigAwIBAgIUWu+kdSSgen8qEMJMmJs1peyagT8wDQYJKoZIhvcNAQELBQAwKTEnMCUGA1UEAwweUG9ja2V0TGluayBYQ1Rlc3QgZXBoZW1lcmFsIENBMB4XDTI2MDEwMTAwMDAwMFoXDTM2MDEwMTAwMDAwMFowITEfMB0GA1UEAwwWUG9ja2V0TGluayBYQ1Rlc3Qgb25seTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJSVzERyXDcE45FQkiX96+BE4jiB4D3qtOvrDD5SbupUcFs1sMBBg/tUOFBTrIws5LbmT1J46m7gems/sJEczZZhg2vaJMwwHOeIMpPN8eMmmjCtMiKrnslNoRZDGbbKhcyoFKzntyX2WixZVf3pAY+M+x+AHLc2I9yKTAkt4tFxmZDalPHjerz4I7idSjUhIjemkHth7yoJvyKZlf5bsRz7DYfA/P5mvCpMcntZtbU5gGf5MTQf/RwDuxVc2BxypmCKm69DaP6cmC9BYBZje56IU+D+1hR305fGVEhVd8xOxSXdOKjWll3hqo9xK6/LDZ/zn3BlBfZ4e4h/oK5NWYcCAwEAAaNIMEYwDAYDVR0TAQH/BAIwADAhBgNVHREEGjAYhwR/AAABhxAAAAAAAAAAAAAAAAAAAAABMBMGA1UdJQQMMAoGCCsGAQUFBwMBMA0GCSqGSIb3DQEBCwUAA4IBAQCUHC9uZCCNhc8GA6PfpQJ3JYcSEpc0bqR3APNiyz7xD2X9zCIAwQxb5CZ+98dXoX8STsC/aVmP9Ej2nU4GmHlXkcw9iOiEr++lV6ttjjkac7Vva08H/Www+SxLGEQDRX7RbMvPPbwRU/YQPG6cS2LYXhEGhH+mwIMvF+RlzvdzrO26ZQhXEIjmdi0EJ7EnD+VhoiEgLJF969jx819EPG/RA7Z8kwTcgKWbDmB36dfqEt5kISY2snuYllYMgWY9HKLNgBvXr7YnykKqXZ0Dp81BaIMQBpw3oruRZhi32Z1pbRArilOQu3nUwpqT20wkvV1x78tVlNtC9Pime6skMZ9m"
+
+    private func certificate() throws -> SecCertificate {
+        let data = try XCTUnwrap(Data(base64Encoded: certificateDER))
+        return try XCTUnwrap(SecCertificateCreateWithData(nil, data as CFData))
+    }
+    private func trust(at time: TimeInterval = 1893456000) throws -> SecTrust {
+        var value: SecTrust?
+        XCTAssertEqual(SecTrustCreateWithCertificates(try certificate(), SecPolicyCreateSSL(true, "127.0.0.1" as CFString), &value), errSecSuccess)
+        let result = try XCTUnwrap(value)
+        SecTrustSetVerifyDate(result, Date(timeIntervalSince1970: time) as CFDate)
+        SecTrustSetNetworkFetchAllowed(result, false)
+        return result
+    }
+    private func policy(host: String = "127.0.0.1", pin: String? = nil) throws -> PairingTrust {
+        let digest = SHA256.hash(data: SecCertificateCopyData(try certificate()) as Data)
+            .map { String(format: "%02x", $0) }.joined()
+        return PairingTrust(endpoint: try PairingEndpoint(server: "https://\(host):8787", code: "12345678", fingerprint: pin ?? digest))
+    }
+    func testPinnedLeafWorksWithoutInstalledRoot() throws {
+        XCTAssertFalse(SecTrustEvaluateWithError(try trust(), nil))
+        XCTAssertTrue(try policy().accepts(trust(), host: "127.0.0.1", port: 8787))
+        XCTAssertTrue(try policy(host: "[::1]").accepts(trust(), host: "::1", port: 8787))
+    }
+    func testRejectsReplacementWrongOriginWrongHostnameAndExpiry() throws {
+        XCTAssertFalse(try policy(pin: String(repeating: "0", count: 64)).accepts(trust(), host: "127.0.0.1", port: 8787))
+        XCTAssertFalse(try policy().accepts(trust(), host: "192.168.1.5", port: 8787))
+        XCTAssertFalse(try policy().accepts(trust(), host: "127.0.0.1", port: 443))
+        XCTAssertFalse(try policy(host: "192.168.1.5").accepts(trust(), host: "192.168.1.5", port: 8787))
+        XCTAssertFalse(try policy().accepts(trust(at: 2208988800), host: "127.0.0.1", port: 8787))
+        XCTAssertFalse(try policy().accepts(trust(at: 1577836800), host: "127.0.0.1", port: 8787))
+    }
 }

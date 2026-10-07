@@ -3,7 +3,7 @@ import https from 'node:https';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { randomInt, createHmac, randomBytes } from 'node:crypto';
+import { randomInt, createHmac, randomBytes, X509Certificate } from 'node:crypto';
 import { addSound, MAX_SOUND_BYTES } from './sound-library.mjs';
 import { networkInterfaces } from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -38,6 +38,9 @@ export async function createPocketServer(options = {}) {
     ? { cert: await readFile(env.TLS_CERT), key: await readFile(env.TLS_KEY) }
     : null;
   const protocol = tls ? 'https' : 'http';
+  const tlsFingerprint = tls
+    ? new X509Certificate(tls.cert).fingerprint256.replaceAll(':', '').toLowerCase()
+    : null;
   const soundDirectory = options.soundDirectory || path.join(root, 'html/dist/sounds');
   const uploadToken = randomBytes(32).toString('hex');
   let uploading = false;
@@ -223,6 +226,8 @@ export async function createPocketServer(options = {}) {
           pairingURL.hash = new URLSearchParams({
             pair: code,
             ...(mode ? { mode } : {}),
+            // A reverse proxy can have a different certificate; use system trust there.
+            ...(!publicOrigin && tlsFingerprint ? { fp: tlsFingerprint } : {}),
           }).toString();
           target = pairingURL.href;
         }

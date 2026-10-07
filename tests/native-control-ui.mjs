@@ -131,6 +131,36 @@ try {
   const command = (message) =>
     phone.evaluate((message) => control.send(JSON.stringify(message)), message);
   await connect();
+  await phone.waitForFunction(() =>
+    messages.some(
+      (m) =>
+        m.type === 'input-state' &&
+        m.devices?.some((d) => d.id === 'phone' && d.name === '手机（无线）'),
+    ),
+  );
+  assert.ok(
+    await phone.evaluate(() =>
+      messages
+        .filter((m) => m.type === 'input-state')
+        .at(-1)
+        .devices.some((d) => d.id === 'hardware'),
+    ),
+  );
+  await command({ type: 'set-input', id: 'removed-device', requestId: 'invalid' });
+  await phone.waitForFunction(() =>
+    messages.some((m) => m.type === 'input-result' && m.requestId === 'invalid' && m.error),
+  );
+  assert.equal(await receiver.locator('#input-device').inputValue(), 'none');
+  await command({ type: 'set-input', id: 'hardware', enabled: true, requestId: 'enable-pc' });
+  await phone.waitForFunction(() =>
+    messages.some((m) => m.type === 'input-result' && m.requestId === 'enable-pc' && !m.error),
+  );
+  assert.equal(await receiver.locator('#input-toggle').getAttribute('aria-pressed'), 'true');
+  await command({ type: 'set-input', id: 'none', requestId: 'sound-only' });
+  await phone.waitForFunction(() =>
+    messages.some((m) => m.type === 'input-result' && m.requestId === 'sound-only'),
+  );
+  assert.equal(await receiver.locator('#input-toggle').getAttribute('aria-pressed'), 'false');
   // An empty installation can receive its first sound without another pairing.
   await receiver.route('**/sounds/index.json', (route) => route.fulfill({ status: 404, body: '' }));
   await command({ type: 'refresh-catalog' });
@@ -182,7 +212,7 @@ try {
     nativeTrack.enabled = true;
   });
   await receiver.waitForFunction(() => level(440) > -35 && level(660) < -65);
-  await receiver.locator('#input-device').selectOption('phone');
+  await command({ type: 'set-input', id: 'phone', requestId: 'phone' });
   await receiver.waitForFunction(() => level(660) > -35 && level(440) < -65);
   await command({ type: 'set-voice', id: 'deep' });
   await phone.waitForFunction(() =>
@@ -211,7 +241,7 @@ try {
   }
   await command({ type: 'play-sound', id: 'tone' });
   await receiver.waitForFunction(() => level(880) > -35 && level(494) > -40);
-  await receiver.locator('#input-device').selectOption('hardware');
+  await command({ type: 'set-input', id: 'hardware', requestId: 'computer' });
   await receiver.waitForFunction(() => level(330) > -40 && level(494) < -65);
   await receiver.locator('#receiver-voice').selectOption('original');
   await phone.waitForFunction(
@@ -260,6 +290,14 @@ try {
   );
 
   await receiver.waitForFunction(() => level(440) < -65);
+  await phone.waitForFunction(() => {
+    const state = messages.filter((m) => m.type === 'input-state').at(-1);
+    return (
+      state?.selected === 'none' &&
+      !state.enabled &&
+      !state.devices.some((d) => d.id === 'hardware')
+    );
+  });
   await phone.evaluate(() => nativeLink.close());
   await receiver.waitForFunction(() => !document.getElementById('pair-section').hidden);
   await receiver.waitForFunction(() => level(880) > -35);

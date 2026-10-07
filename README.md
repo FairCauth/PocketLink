@@ -29,7 +29,7 @@
 
 ## USB 直连（使用新版 iOS App）
 
-数据线连接并信任电脑 → 运行 **Start-PocketLink.cmd** → 电脑点击「连接手机 → USB 有线」创建配对码 → App 选择 USB 有线并输入配对码 → 电脑输入选择「手机」并开启 → App 开启麦克风。电脑接收页默认 `https://localhost:8787/receiver`。需先编译安装 iOS 0.3.0 / Build 4；本轮尚未完成真机验收。
+数据线连接并信任电脑 → 运行 **Start-PocketLink.cmd** → 电脑点击「连接手机 → USB 有线」创建配对码 → App 选择 USB 有线并输入配对码 → 电脑输入选择「手机」并开启 → App 开启麦克风。电脑接收页默认 `https://localhost:8787/receiver`。需先编译安装 iOS 0.4.0 / Build 5；本轮尚未完成真机验收。
 
 ## 无线快速开始（Windows + iPhone）
 
@@ -49,7 +49,9 @@ https://localhost:8787/receiver
 
 ### 2. 配置手机并连接
 
-第一次使用，在电脑接收端点击 **「首次使用 iPhone？」**，用 Safari 打开设置页，下载并安装公共根证书：
+**原生 App 无线连接：** 用 Build 5 或更新的 App 扫描新版电脑配对二维码即可，无需安装手机证书。App 可选择电脑麦克风、手机（USB 有线 / 无线）或仅音效，与电脑同步。详见 [iOS 说明](ios/README.md)。
+
+**手机网页版：** 第一次使用，在电脑接收端点击 **「首次使用 iPhone？」**，用 Safari 打开设置页，下载并安装公共根证书：
 
 1. **Settings → Profile Downloaded → Install**。
 2. **Settings → General → About → Certificate Trust Settings**，开启对应根证书的完全信任。
@@ -67,7 +69,7 @@ https://localhost:8787/receiver
 
 停止服务：在启动窗口按 **Ctrl+C**。
 
-安装失败会提示缺少的组件，准备日志在 `.runtime/startup.log`。Apple Devices、手机 Trust、无线模式的 iPhone 根证书安装信任、VB-CABLE 安装器的系统授权仍可能需要首次手动操作。[一键启动说明](docs/usage.md#一键启动的自动准备)
+安装失败会提示缺少的组件，准备日志在 `.runtime/startup.log`。Apple Devices、手机 Trust、网页版的 iPhone 根证书安装信任、VB-CABLE 安装器的系统授权仍可能需要首次手动操作。[一键启动说明](docs/usage.md#一键启动的自动准备)
 
 ## 音频驱动管理
 

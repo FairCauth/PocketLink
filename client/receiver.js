@@ -57,7 +57,22 @@ const remoteSounds = new RemoteSoundboard(
       presets: VOICE_PRESETS.map(({ id, name }) => ({ id, name })),
     }),
     set: setReceiverVoice,
-    input: () => ({ phone: $('input-device').value === 'phone', enabled: inputEnabled }),
+    input: () => ({
+      phone: $('input-device').value === 'phone',
+      selected: $('input-device').value || 'none',
+      enabled: inputEnabled,
+      pending: inputPending,
+      devices: [...$('input-device').options].map(({ value, text }) => ({ id: value, name: text })),
+    }),
+    setInput: async (id, enabled) => {
+      if (![...$('input-device').options].some((option) => option.value === id))
+        throw new Error('麦克风已不可用，请重新选择。');
+      const active = enabled ?? (inputEnabled || inputPending);
+      $('input-device').value = id;
+      stopInput();
+      if (active && id !== 'none' && !(await startInput(true)))
+        throw new Error('输入已改变，请重新选择。');
+    },
   },
   ensureStudio,
 );
@@ -607,7 +622,10 @@ function renderInputs() {
   const previous = $('input-device').value || 'none';
   const options = [new Option('仅音效（无麦克风）', 'none')];
   for (const device of availableInputs) options.push(new Option(device.label, device.deviceId));
-  if (phoneStream) options.push(new Option('手机', 'phone'));
+  if (phoneStream)
+    options.push(
+      new Option(connectionMode === 'usb' ? '手机（USB 有线）' : '手机（无线）', 'phone'),
+    );
   $('input-device').replaceChildren(...options);
   $('input-device').value = options.some((option) => option.value === previous) ? previous : 'none';
   renderAudioState();
@@ -620,7 +638,7 @@ function stopInput() {
   $('input-status').textContent = '';
   renderAudioState();
 }
-async function startInput() {
+async function startInput(throwOnError = false) {
   stopInput();
   const id = $('input-device').value;
   if (id === 'none') return;
@@ -640,11 +658,13 @@ async function startInput() {
     }
     inputEnabled = true;
     $('input-status').textContent = id === 'phone' ? '请在手机上开启麦克风。' : '';
+    return true;
   } catch (error) {
     if (generation !== mixGeneration) return;
     stopInput();
     $('input-status').textContent =
       error.name === 'NotAllowedError' ? '请允许浏览器使用麦克风，音效仍可使用。' : error.message;
+    if (throwOnError) throw new Error($('input-status').textContent);
   } finally {
     if (generation === mixGeneration) inputPending = false;
     renderAudioState();

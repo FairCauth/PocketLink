@@ -13,6 +13,7 @@
     <key>NSMicrophoneUsageDescription</key><string>开启麦克风时将人声传给电脑；开启后台保持时持续采集以维持音频会话，但关闭人声发送时不传输或保存人声。</string>
     <key>NSCameraUsageDescription</key><string>扫描电脑接收页的二维码以配对。</string>
     <key>NSLocalNetworkUsageDescription</key><string>连接同一网络中的 PocketLink 电脑服务并传输音频。</string>
+    <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
     <key>UIBackgroundModes</key><array><string>audio</string></array>
     <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
     <key>UILaunchScreen</key><dict/>

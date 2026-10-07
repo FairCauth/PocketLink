@@ -126,6 +126,28 @@ export class RemoteSoundboard extends EventTarget {
       }
       if (message?.type === 'play-sound') void this.play(message.id, channel);
       if (message?.type === 'stop-sound') this.stop();
+      if (message?.type === 'set-input' && this.voiceControl?.setInput) {
+        if (
+          typeof message.id !== 'string' ||
+          message.id.length > 256 ||
+          typeof message.requestId !== 'string' ||
+          message.requestId.length > 64 ||
+          (message.enabled !== undefined && typeof message.enabled !== 'boolean')
+        )
+          return;
+        try {
+          await this.voiceControl.setInput(message.id, message.enabled);
+          if (this.channel === channel) {
+            this.sendInputState();
+            this.send({ type: 'input-result', requestId: message.requestId });
+          }
+        } catch (error) {
+          if (this.channel === channel) {
+            this.sendInputState();
+            this.send({ type: 'input-result', requestId: message.requestId, error: error.message });
+          }
+        }
+      }
       if (message?.type === 'set-voice' && this.voiceControl) {
         try {
           await this.voiceControl.set(message.id);
